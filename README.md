@@ -82,11 +82,22 @@ each constant alone (tilt shrinkage 0 and 25, growth weight 0 and 1, maturity fl
 (no shrinkage keeps only 6 of the top 10), the rest move the board far less.
 
 Limits, stated plainly: the model scores value if a token launched — it does not
-estimate the probability a token launches, so it conflates the two. No backtest of
-launch outcomes is possible from a single snapshot: there is no earlier board to
-check the ranking against, and no launch dates to predict from. What the single
-snapshot does allow is validating the pricing function on the 119 live comps whose
-market caps are known — and that validation is what this model is built on.
+estimate the probability a token launches. Two attempts were made to close that
+gap, and both are shown in the dashboard's Method tab rather than hidden. First,
+the backtest: a single snapshot cannot test launch outcomes (no earlier board to
+check the ranking against, no launch dates to predict from), but it can test the
+pricing function four times over — the curve refit at four listing cutoffs
+(2023-06-30, 2023-12-31, 2024-06-30, 2024-12-31) and scored on the comps listed
+from each cutoff on: median error 0.376–0.454 dex, 33–46% within 2×. Second, the
+two-stage model: P(records a token | log TVL, age, chains, 7d change) was fitted
+by logistic regression on 80% of protocols and tested on the other 20% by slug
+hash — held-out AUC 0.57, barely above chance, with the lowest-scored quintile
+predicted 37% and actually recording a token 53% of the time. Multiplying implied
+values by that factor would reshuffle the board on near-noise, and age — its
+strongest coefficient — is already the maturity multiplier, so it would
+double-count the one signal that exists. The two-stage factor is therefore not
+adopted: the board prices value if a token launches and says nothing about the
+probability, and the test that decided that is printed with its numbers.
 
 The board ranks all 40 watchlist slugs — the gate requires full coverage — plus
 every other pre-token protocol that passes the watchlist's exclusion rule, at any

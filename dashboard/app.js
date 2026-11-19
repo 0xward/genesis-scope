@@ -268,6 +268,11 @@
     }
     return '<div class="movers">' + chips + '</div>';
   }
+  function shownChains(r) {
+    var cs = (r.chains || []).slice();
+    if (st.chain !== 'all') cs = [st.chain].concat(cs.filter(function (c) { return c !== st.chain; }));
+    return cs.slice(0, 2).join(', ') || 'an unnamed chain';
+  }
   function boardHtml() {
     var list = sortedRows(shownRows());
     if (list.length === 0) {
@@ -284,7 +289,7 @@
       var phCls = perHour >= 0 ? 'pos' : 'neg';
       return '<tr data-slug="' + esc(r.slug) + '" tabindex="0"' + (st.sel === r.slug ? ' class="sel"' : '') + '>' +
         '<td class="rank' + (r.rank <= 3 ? ' top3' : '') + '">' + r.rank + '</td>' +
-        '<td><div class="rowid"><span class="mono" aria-hidden="true">' + esc((r.name || '·')[0]) + '</span><div><div class="name"><b>' + esc(r.name) + '</b><span class="rowarrow" aria-hidden="true"> →</span></div><span class="sub"><span class="catdot cat-' + catColor(r.category) + '"></span>' + esc(r.category || 'Other') + ' on ' + esc((r.chains || []).slice(0, 2).join(', ') || 'an unnamed chain') + (WL[r.slug] ? ' · watchlist' : ' · early') + '</span></div></div></td>' +
+        '<td><div class="rowid"><span class="mono" aria-hidden="true">' + esc((r.name || '·')[0]) + '</span><div><div class="name"><b>' + esc(r.name) + '</b><span class="rowarrow" aria-hidden="true"> →</span></div><span class="sub"><span class="catdot cat-' + catColor(r.category) + '"></span>' + esc(r.category || 'Other') + ' on ' + esc(shownChains(r)) + (WL[r.slug] ? ' · watchlist' : ' · early') + '</span></div></div></td>' +
         '<td class="num" title="' + fmtUsdFull(r.tvl_usd) + '">' + fmtUsd(r.tvl_usd) + '</td>' +
         '<td class="num ' + gc + '">' + g + '</td>' +
         '<td><div class="implied"><span class="num" title="' + fmtUsdFull(r.implied_value_usd) + '">' + fmtUsd(r.implied_value_usd) + '</span><div class="bar" aria-hidden="true"><i class="' + (r.rank <= 3 ? 'top3' : '') + '" style="width:' + w + '%"></i></div></div></td>' +
@@ -391,6 +396,10 @@
   }
   function methodHtml() {
     var c = D.curve;
+    var rollMin = Math.min.apply(null, D.walk_forward_rolling.map(function (v) { return v.median_abs_log_err; }));
+    var rollMax = Math.max.apply(null, D.walk_forward_rolling.map(function (v) { return v.median_abs_log_err; }));
+    var rollWMin = Math.min.apply(null, D.walk_forward_rolling.map(function (v) { return v.within_2x; }));
+    var rollWMax = Math.max.apply(null, D.walk_forward_rolling.map(function (v) { return v.within_2x; }));
     var atTvl = function (tvl) {
       var fitted = Math.pow(10, c.intercept + c.slope * Math.log10(tvl));
       return '<tr><td class="num">' + fmtUsd(tvl) + '</td><td class="num">' + fmtUsd(fitted) + '</td><td class="num">' + (fitted / tvl).toFixed(3) + '×</td></tr>';
@@ -411,6 +420,14 @@
       curveChart() +
       valTable(D.validation, 'Fitted curve — validated on known market caps') +
       valTable(D.flat_validation, 'Flat category-median ratio (radar-2) — same splits, for comparison') +
+      '<h3>Rolling walk-forward — the backtest a single snapshot allows</h3>' +
+      '<table><thead><tr><th scope="col">Cutoff</th><th scope="col" class="num">Fit on</th><th scope="col" class="num">Tested on</th><th scope="col" class="num">Median |error|</th><th scope="col" class="num">Within 2×</th></tr></thead><tbody>' +
+      D.walk_forward_rolling.map(function (v) {
+        return '<tr><td>Listings before ' + esc(v.cutoff) + '</td><td class="num">' + v.train + '</td><td class="num">' + v.test + '</td><td class="num">' + v.median_abs_log_err.toFixed(3) + ' dex</td><td class="num">' + Math.round(v.within_2x * 100) + '%</td></tr>';
+      }).join('') + '</tbody></table>' +
+      '<p class="note">Each row refits the curve on the comps listed before the cutoff and tests it on the comps listed from it on — the pricing function, fit on the past, scored on the future. The error stays in the ' + rollMin.toFixed(3) + '–' + rollMax.toFixed(3) + ' dex band (' + Math.round(rollWMin * 100) + '–' + Math.round(rollWMax * 100) + '% within 2×) across all four cutoffs. That is the backtest a single snapshot allows: it cannot test whether a token launches, because no launch dates exist to predict from, but it can test the pricer four times over.</p>' +
+      '<h3>Why there is no launch-probability factor</h3>' +
+      '<p>A two-stage model — P(launch) × value — was fitted from the snapshot’s own figures: logistic regression on log TVL, age, chains and 7d change, trained on 80% of protocols and tested on the other 20% by slug hash. Held-out AUC ' + D.propensity_test.test_auc.toFixed(2) + ' (train ' + D.propensity_test.train_auc.toFixed(2) + '): barely above chance, and the calibration is wrong at the bottom — the lowest-scored quintile was predicted ' + Math.round(D.propensity_test.quintiles[0].predicted * 100) + '% likely to record a token and actually did ' + Math.round(D.propensity_test.quintiles[0].actual * 100) + '% of the time, while the top quintile was predicted ' + Math.round(D.propensity_test.quintiles[4].predicted * 100) + '% and actually did ' + Math.round(D.propensity_test.quintiles[4].actual * 100) + '%. Multiplying implied values by that factor would reshuffle the board on near-noise — and age, its strongest coefficient, is already the maturity multiplier, so it would double-count the one signal that exists. The board therefore prices value if a token launches and says nothing about the probability. The test is shown here so the limit is a measured decision, not an omission.</p>' +
       '<p class="note">Errors are in dex (log10): 0.30 dex is about a factor of 2. “Within 2×” is the share of tested comps the model priced within a factor of two of their real market cap. Leave-one-out refits the curve 119 times; the hash split fits on 80% of comps (by slug hash) and tests on the other 20%; walk-forward fits on the older half of the dated comps and tests on the newer half — the closest thing to a backtest a single snapshot allows. A single snapshot cannot test whether a token launches: the model prices value <i>if</i> one did, and says nothing about the probability.</p>' +
       '<h3>The curve at four sizes (no category tilt)</h3>' +
       '<table><thead><tr><th scope="col" class="num">TVL</th><th scope="col" class="num">Fitted mcap</th><th scope="col" class="num">Implied multiple</th></tr></thead><tbody>' + atTvl(1e7) + atTvl(1e8) + atTvl(1e9) + atTvl(1e10) + '</tbody></table>' +
@@ -479,10 +496,11 @@
     var tr = e.target.closest ? e.target.closest('tr[data-slug]') : null;
     if (el) {
       var act = el.getAttribute('data-act');
-      if (act === 'tab') { st.tab = el.getAttribute('data-tab'); st.sel = null; writeHash(); render(); }
+      if (act === 'tab') { st.tab = el.getAttribute('data-tab'); st.sel = null; st.all = false; writeHash(); render(); }
       else if (act === 'sort') {
         var k = el.getAttribute('data-key');
-        if (st.sort === k) st.dir = -st.dir; else { st.sort = k; st.dir = -1; }
+        if (st.sort === k) st.dir = -st.dir;
+        else { st.sort = k; st.dir = (k === 'name' || k === 'rank' || k === 'cost') ? 1 : -1; }
         render();
       } else if (act === 'clear') { st.q = ''; st.cat = 'all'; st.chain = 'all'; st.wl = false; writeHash(); render(); }
       else if (act === 'showall') { st.all = true; render(); }

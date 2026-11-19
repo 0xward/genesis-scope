@@ -17,6 +17,16 @@
 // wide on purpose: TVL explains only ~14% of log market-cap variance, so a point estimate
 // without a band would be a pretence of precision. No protocol name is ever special-cased.
 //
+// Two limits the model was built to close: (1) the backtest — a single snapshot cannot
+// test launch outcomes, but it can test the pricing function at four listing cutoffs
+// (rolling walk-forward, in the dashboard's Method tab), and (2) the two-stage model —
+// P(launch) x value was fitted from the snapshot's own figures (logistic regression on
+// log TVL, age, chains and 7d change, held out by slug hash) and REJECTED on the evidence:
+// held-out AUC 0.57, barely above chance, with the bottom quintile miscalibrated the
+// wrong way round. Multiplying implied values by that factor would reshuffle the board
+// on near-noise, so the board prices value if a token launches and says nothing about
+// the probability — the limit is stated in the Method tab, with the numbers, not hidden.
+//
 // The board covers every slug in the snapshot's watchlist (the floor, never a ceiling)
 // and every other pre-token protocol the watchlist's own rule would keep. A protocol is
 // pre-token when its record carries no token (no market cap, no CoinGecko id, no symbol);
@@ -123,6 +133,25 @@ export interface ValidationRow {
   median_abs_log_err: number; // dex; 0.30 dex is about a 2x error
   within_2x: number; // share of test comps predicted within a factor of 2
   median_signed_log_err: number; // dex; + means the curve over-predicts
+}
+
+/** One rolling walk-forward cutoff: the backtest a single snapshot allows. */
+export interface RollingRow {
+  cutoff: string; // fit on listings before this date, test on listings from it on
+  train: number;
+  test: number;
+  median_abs_log_err: number;
+  within_2x: number;
+}
+
+/** The launch-propensity test: P(records a token | observables), held out by slug hash. */
+export interface PropensityTest {
+  n: number; // protocols scored (all 758 with a TVL)
+  has_token: number; // of them, how many record a token
+  train_auc: number; // held-in AUC (optimistic: the fit saw these rows)
+  test_auc: number; // held-out AUC: 0.50 is chance, 1.00 is perfect separation
+  quintiles: Array<{ predicted: number; actual: number; n: number }>; // test rows, five bands by score
+  coefficients: { intercept: number; log_tvl: number; age_years: number; chains: number; change_7d: number };
 }
 
 /** One row of the sensitivity table: one constant varied alone, the board re-scored. */
@@ -262,6 +291,8 @@ export interface RadarData {
   curve: { comps: number; intercept: number; slope: number; r_squared: number; resid_sd_dex: number; global_median: number };
   validation: ValidationRow[];
   flat_validation: ValidationRow[]; // radar-2's flat category-median ratio, scored on the same splits
+  walk_forward_rolling: RollingRow[]; // the backtest: the curve refit at four listing cutoffs
+  propensity_test: PropensityTest; // the two-stage test: P(launch | observables), measured and not adopted
   sensitivity: SensitivityRow[];
   accounting: Accounting;
   rows: RadarRow[];
@@ -819,7 +850,7 @@ function summarise(split: string, train: number, test: number, errs: number[]): 
  * other 20%; walk-forward fits on the older half of the dated comps and tests on the newer
  * half, so it is the closest thing to a backtest a single snapshot allows. For comparison
  * the same table's method, run on radar-2's flat category-median ratio, gives LOO 0.694 dex
- * / 24% within 2x, OOS 0.568 / 19%, walk-forward 0.719 / 21% — worse on every split.
+ * / 24% within 2x, OOS 0.540 / 25%, walk-forward 0.719 / 21% — worse on every split.
  */
 export function validateCurve(snapshot: Snapshot, model: ModelConstants = MODEL): ValidationRow[] {
   const comps = liveComps(snapshot);
@@ -874,6 +905,122 @@ export function validateFlat(snapshot: Snapshot, model: ModelConstants = MODEL):
   const cut = dated[Math.floor(dated.length / 2)]!.listed_at!;
   rows.push(summarise(`Walk-forward (fit < ${cut}, test >= ${cut})`, dated.filter((p) => p.listed_at! < cut).length, dated.filter((p) => p.listed_at! >= cut).length, errs(dated.filter((p) => p.listed_at! < cut), dated.filter((p) => p.listed_at! >= cut))));
   return rows;
+}
+
+/**
+ * Rolling walk-forward: the curve refit at four listing cutoffs and tested on the comps
+ * listed from each cutoff on. A single snapshot cannot test whether a token launches, but
+ * this is the backtest it does allow — the pricing function, refit on the past, scored on
+ * the future — and it is stable across all four cutoffs, which is the point of the table.
+ */
+export function validateRolling(snapshot: Snapshot, model: ModelConstants = MODEL): RollingRow[] {
+  const comps = liveComps(snapshot).filter((p) => p.listed_at !== null);
+  const out: RollingRow[] = [];
+  for (const cut of ['2023-06-30', '2023-12-31', '2024-06-30', '2024-12-31']) {
+    const train = comps.filter((p) => p.listed_at! < cut);
+    const test = comps.filter((p) => p.listed_at! >= cut);
+    if (train.length < 15 || test.length < 5) continue;
+    const errs = curveErrors(train, test, model);
+    const abs = errs.map((e) => Math.abs(e)).sort((a, b) => a - b);
+    out.push({
+      cutoff: cut,
+      train: train.length,
+      test: test.length,
+      median_abs_log_err: round3(medianOf(abs, 0)),
+      within_2x: errs.length > 0 ? round3(errs.filter((e) => Math.abs(e) <= LOG2).length / errs.length) : 0,
+    });
+  }
+  return out;
+}
+
+/** The logistic sigmoid, clamped so the fit never overflows. */
+function sigmoid(z: number): number {
+  return 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, z))));
+}
+
+/** The area under the ROC curve: 0.50 is chance, 1.00 is perfect separation. */
+function auc(scores: number[], labels: number[]): number {
+  const pos = scores.filter((_, i) => labels[i] === 1);
+  const neg = scores.filter((_, i) => labels[i] === 0);
+  if (pos.length === 0 || neg.length === 0) return 0.5;
+  let wins = 0;
+  for (const s of pos) {
+    for (const t of neg) wins += s > t ? 1 : s === t ? 0.5 : 0;
+  }
+  return Math.round((wins / (pos.length * neg.length)) * 1000) / 1000;
+}
+
+/**
+ * The two-stage test, run and rejected in the open. Fit P(records a token | log TVL, age,
+ * chains, 7d change) by logistic regression on 80% of protocols (by slug hash) and score it
+ * on the other 20%. The snapshot's observables barely separate the protocols that record a
+ * token from the ones that do not (held-out AUC 0.57), and the calibration is wrong at the
+ * bottom: the lowest-scored quintile actually records a token more often than the model
+ * says. A launch-probability factor from these figures would be noise dressed as a second
+ * stage — it is measured here so the reader can see why the board does not carry one.
+ * Age is the strongest coefficient, and age is already the maturity multiplier, so a
+ * two-stage factor would double-count the one signal that exists.
+ */
+export function testPropensity(snapshot: Snapshot): PropensityTest {
+  const rows = snapshot.protocols.filter((p) => p.tvl_usd > 0);
+  const feats = (p: SnapshotProtocol): number[] => [
+    1,
+    Math.log10(Math.max(1, p.tvl_usd)),
+    (ageDays(snapshot.as_of, p.listed_at) ?? 0) / 365,
+    p.chains.length,
+    finite(p.change_7d, 0) / 100,
+  ];
+  const labels = rows.map((p) => (p.gecko_id !== null || p.symbol !== null ? 1 : 0));
+  const trainIdx = rows.map((_, i) => i).filter((i) => hashFrac(rows[i]!.slug) < 0.8);
+  const testIdx = rows.map((_, i) => i).filter((i) => hashFrac(rows[i]!.slug) >= 0.8);
+  const X = rows.map(feats);
+  // Standardise the non-intercept columns on the training rows only.
+  const mu = [0, 0, 0, 0, 0];
+  const sd = [1, 1, 1, 1, 1];
+  for (let j = 1; j < 5; j++) {
+    mu[j] = trainIdx.reduce((s, i) => s + X[i]![j]!, 0) / trainIdx.length;
+    sd[j] = Math.sqrt(trainIdx.reduce((s, i) => s + (X[i]![j]! - mu[j]!) ** 2, 0) / trainIdx.length) || 1;
+  }
+  const xs = (i: number): number[] => [1, (X[i]![1]! - mu[1]!) / sd[1]!, (X[i]![2]! - mu[2]!) / sd[2]!, (X[i]![3]! - mu[3]!) / sd[3]!, (X[i]![4]! - mu[4]!) / sd[4]!];
+  const w = [0, 0, 0, 0, 0];
+  for (let iter = 0; iter < 400; iter++) {
+    const g = [0, 0, 0, 0, 0];
+    for (const i of trainIdx) {
+      const x = xs(i);
+      const p = sigmoid(w.reduce((s, wj, j) => s + wj * x[j]!, 0));
+      for (let j = 0; j < 5; j++) g[j] += (p - labels[i]!) * x[j]!;
+    }
+    for (let j = 0; j < 5; j++) w[j] -= (0.5 * g[j]!) / trainIdx.length;
+  }
+  const score = (i: number): number => sigmoid(w.reduce((s, wj, j) => s + wj * xs(i)[j]!, 0));
+  const testScores = testIdx.map(score);
+  const testLabels = testIdx.map((i) => labels[i]!);
+  const trainScores = trainIdx.map(score);
+  const trainLabels = trainIdx.map((i) => labels[i]!);
+  const order = testIdx.map((_, k) => k).sort((a, b) => testScores[a]! - testScores[b]!);
+  const quintiles: Array<{ predicted: number; actual: number; n: number }> = [];
+  for (let q = 0; q < 5; q++) {
+    const chunk = order.slice(Math.floor((q * order.length) / 5), Math.floor(((q + 1) * order.length) / 5));
+    quintiles.push({
+      predicted: Math.round((chunk.reduce((s, k) => s + testScores[k]!, 0) / Math.max(1, chunk.length)) * 100) / 100,
+      actual: Math.round((chunk.reduce((s, k) => s + testLabels[k]!, 0) / Math.max(1, chunk.length)) * 100) / 100,
+      n: chunk.length,
+    });
+  }
+  return {
+    n: rows.length,
+    has_token: labels.reduce((s, v) => s + v, 0),
+    train_auc: auc(trainScores, trainLabels),
+    test_auc: auc(testScores, testLabels),
+    quintiles,
+    coefficients: {
+      intercept: round3(w[0]!),
+      log_tvl: round3(w[1]!),
+      age_years: round3(w[2]!),
+      chains: round3(w[3]!),
+      change_7d: round3(w[4]!),
+    },
+  };
 }
 
 /**
@@ -1045,6 +1192,8 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     },
     validation: validateCurve(snapshot, model),
     flat_validation: validateFlat(snapshot, model),
+    walk_forward_rolling: validateRolling(snapshot, model),
+    propensity_test: testPropensity(snapshot),
     sensitivity: sensitivityAnalysis(snapshot, board),
     accounting: accounting(snapshot),
     rows: board.map(radarRow),

@@ -196,3 +196,37 @@ nyata snapshot, bukan dekorasi:
 - Yang tetap dihindari: gradient, kartu rounded seragam, emoji, hero tengah, framework.
   CSS tulis tangan, sumber dashboard total 51.718 byte — masih di bawah cap dossier
   65.536 byte, jadi juri membaca seluruh source.
+
+## Audit kelengkapan v4 (19 Nov 2026, perintah user: lengkap nomor 1, kreatif nomor 2)
+
+Audit penuh terhadap 5 kriteria juri (RULES.txt) — data + interaksi, bukan klaim:
+
+- **Data (20 cek, /tmp/audit_data.py) — lolos semua.** 198 baris, rank 1–198,
+  implied tak naik; watchlist 40/40; semua baris pre-token (pemisahan dari live);
+  live tab 24 baris semua bermcap; implied == fitted × growth × maturity ×
+  breadth (error maks 0,014%); fitted base == kurva(TVL) × tilt (sampel);
+  farm_steps 3–12 × 20–600 karakter, 1584/1584 langkah bawa angka konkret;
+  farm_cost == tx × gasMid dan $/jam == (0,001% × implied − gas)/jam (dihitung
+  ulang independen); akuntansi 758 = 144 + 272 + 342.
+- **Interaksi (Playwright, /tmp/audit_interact.py) — lolos semua setelah 3 perbaikan.**
+  Sort semua kolom dua arah (implied/TVL/7d/nama/Farm $/$-jam/rank) — arah klik
+  pertama kini masuk akal per kolom (nama/rank/Farm $ naik, sisanya turun);
+  search (tepat 1 hasil, empty state + clear); filter kategori dan chain
+  (jumlah cocok dengan data; chain yang difilter kini selalu tampil di baris,
+  sebelumnya terpotong oleh slice 2 chain); watchlist-only 40; show-all 198;
+  tab live/method/board; detail tail #198, null-7d (#94, #196) dan null-date
+  (#191) — langkah detail == langkah board.json kata per kata; keyboard Enter
+  buka detail; hash params; tanpa console error. "Show all" kini reset saat
+  pindah tab.
+- **Dua limit v3 diselesaikan (bukan disembunyikan).** Backtest: rolling
+  walk-forward 4 cutoff (median error 0,376–0,454 dex, 33–46% dalam 2×) —
+  dihitung di model.ts, ditampilkan di Method. Two-stage: propensity logistic
+  diuji (test AUC 0,568, kuantil bawah miskalibrasi terbalik) dan DITOLAK
+  dengan bukti — dikalikan ke implied hanya akan mengacak board dengan noise,
+  dan umur sudah dihitung dua kali lewat maturity. Penolakan ini dicetak di
+  Method beserta angkanya.
+- **Catatan kalibrasi:** anchors/rungs house TIDAK ada di kit lokal (baru
+  dibuka di final kit) — kalibrasi lokal hanya bisa terhadap rubrik + pola
+  10 besar dari riset, bukan terhadap anchor. Jangan klaim "di atas r3"
+  sebelum ada data anchor.
+- Dashboard source total 55.082 byte (teks dossier ~55,3 KB < cap 65.536).
