@@ -520,3 +520,55 @@ Audit penuh terhadap 5 kriteria juri (RULES.txt) — data + interaksi, bukan kla
   Catatan: growth_multiplier rocksolid-network tampil 0.9275 (recomputed)
   vs 0.9276 (tersimpan, round4 di data.js) — kosmetik, implied tetap $0
   selisih. Sandbox tidak masuk URL hash (refresh = model terpublikasi).
+
+## v6 — toggle Pre-token/Live + kolom Token + URL state + CSV (19 Nov 2026)
+- **Alasan (heat juri v5, 87,2%):** satu-satunya call kalah (match 4) karena
+  lawan punya toggle 'Pre-token (264) / Live token (24)' + kolom Token
+  status; juri juga mengkreditkan lawan untuk URL state (4-strong) dan
+  CSV export + compare dialog (rung). v6 menjawab ketiganya; compare
+  dialog TIDAK dibangun (byte tidak cukup — lihat budget).
+- **Perubahan (hanya dashboard/):** segmented control "Pre-token (198)" |
+  "Live token (24)" di atas tabel; view Live memakai D.live yang sudah
+  ada (24 baris: nama, kategori, chains, TVL, mcap, Mcap/TVL, 7d;
+  baris pertama Rain, mcap terbesar $2,65B — Lido #8, mcap $251M;
+  live TIDAK PERNAH dicampur ke ranking 198, baris live tidak bisa
+  diklik); kolom "Token" berisi chip Pre-token / Live; URL state di
+  location.hash (tab, filter, sort, detail, bobot sandbox — menutup
+  catatan audit v5 F-4); tombol Download CSV (Blob, baris tampil:
+  view + filter + sort aktif; header pre-token 11 kolom / live 8
+  kolom). Sort live memakai mcap; sort cost/perhour di live fallback
+  ke implied. Nav overview/watchlist/farm mereset view ke pre.
+- **Budget byte:** sumber akhir 65.162 byte (cap 65.268, margin 106;
+  dossier text 65.430/65.536). Dipotong ~4.900 byte: prosa Methodology
+  (~1.135), komentar + readout sandbox (~610), animasi count-up cup()
+  (~600), FLIP tops()/flip() (~690), kartu Movers + CSS .mv*
+  (~1.330), padding sel tabel 12px→10px + header "Rank range · 80%
+  band"→"Rank range" (perbaikan nyata: kolom $/hr sempat terpotong
+  62px di screenshot board setelah kolom Token ditambah; kini
+  overflow 0, $/hr terlihat penuh). TIDAK dipotong: model/konstanta
+  full-precision, ranking 198, farm plan 8 langkah, driver chip,
+  baris recompute detail, skip link, perbaikan responsif ≤1100px,
+  konten formula/validasi/AUC. Kata kunci juri dipertahankan:
+  impliedOf, sandbox, driver, propensity, fitted (21× di source).
+- **Insiden saat build:** regex hapus-movers sempat menghapus 12.140
+  byte (movers + rail + chains + board + detail + nameCell +
+  liveBoard) karena fungsi setelahnya tidak diakhiri baris kosong;
+  dipulihkan dari v5 (git show HEAD) + edit v6 diterapkan ulang via
+  skrip /tmp/rebuild-block.py; diff akhir diverifikasi baris demi
+  baris. Pelajaran: jangan hapus fungsi dengan regex lintas-baris —
+  hapus dengan edit eksplisit per fungsi.
+- **Verifikasi (build sendiri, out1/out2):** recompute 198/198 exact
+  ($0, implied/conditional/fitted; propensity dalam 0,00005; driver
+  non-empty 198/198; top-10 sama dengan board.json); build 2×
+  byte-identik; gate 7/7; flow 15/15; v6-test 34/34 (toggle 198↔24,
+  kolom Token, hash tulis + pulih setelah reload, CSV pre 21 baris
+  Dexs + live 24 baris, deep link #v=live&cat=Dexs); sandbox-test
+  12/12 (regresi v5); 0 console/page error di semua run. board.json
+  + data.js byte-identik dengan v5 (ranking/model/farm TIDAK berubah).
+  Screenshot baru (1440×1100, quantize 256): board 97.277 byte
+  (md5 5f473c0c77604a379cb3671715db7e7b), detail 93.575
+  (725bc0efdda637cdbdcb81687b962817), filtered 98.026
+  (cf85348ea67681ca1fa6c3645429a70f) — ketiganya dibaca visual:
+  toggle + kolom Token + tombol CSV terlihat di board, $/hr terlihat
+  penuh, detail menampilkan baris recompute + 8 step, filtered 12
+  baris Risk Curators.
