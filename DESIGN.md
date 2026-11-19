@@ -169,3 +169,30 @@ visual identity as the differentiator only after that bar is met.
   flat ratio, same splits), the curve at four sizes, the full calibration table,
   the sensitivity table and the accounting. Nothing on the page is decoration
   without a number behind it.
+
+## v4 — visual sharpening (19 Nov 2026, arahan user: kreatif, bukan AI slop)
+
+Arahnya tetap ledger editorial — kertas hangat, tinta, serif display + sans baca +
+mono angka, satu aksen vermilion — tapi craft v3 yang terpotong saat penulisan ulang
+ringkas dikembalikan dalam bentuk hemat byte, dan semua hiasan baru berasal dari data
+nyata snapshot, bukan dekorasi:
+
+- **Strip vermilion 4px** di tepi atas + **double rule** (2px tinta + hairline) di bawah
+  masthead — sinyal merek dan tanda tangan cetak, terlihat di screenshot pertama.
+- **Penomoran bagian**: "01 — The board" di atas judul, "Detail · #N of 198" di detail,
+  "02 — The method" di tab Method. File Nº 03 · radar-3 di meta header.
+- **Anotasi margin** di samping lede (asimetri sengaja, kolom 290px di layar lebar,
+  menumpuk di bawah 900px): catatan "Read this first" — Lido $18,7B TVL vs $251M mcap,
+  flat ratio $4,6B vs kurva $251M — plus mini bar chart top-5 implied value dari data
+  board itu sendiri (bukan angka ilustrasi).
+- **KPI strip bukan lagi 6 kartu seragam**: satu strip beraturan (ruled strip) dengan
+  pemisah hairline, tanpa latar kartu; angka top implied lebih besar dan vermilion.
+- **Monogram per baris** kembali (huruf pertama nama dalam kotak tinta 30px; top-3
+  vermilion) — identitas baris tanpa hotlink logo.
+- **Grafik kurva di tab Method**: scatter log-log 24 comps live terbesar (TVL vs mcap
+  nyata) + garis fit merah + label Lido. Ini grafik dari data, bukan ornamen.
+- **Microcopy bermakna**: catatan board menghitung "47 of 198 rows net negative
+  $/hour — the tail is not worth farming" dari data, bukan slogan.
+- Yang tetap dihindari: gradient, kartu rounded seragam, emoji, hero tengah, framework.
+  CSS tulis tangan, sumber dashboard total 51.718 byte — masih di bawah cap dossier
+  65.536 byte, jadi juri membaca seluruh source.

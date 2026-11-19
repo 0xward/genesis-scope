@@ -209,18 +209,26 @@
   }
   function headerHtml() {
     return '<header class="top"><div class="brand"><span>' + logo(28) + '</span><span class="brand-name">Genesis Scope</span><span class="brand-tag">Pre-token protocols, ranked</span></div>' +
-      '<div class="top-meta">Snapshot ' + fmtDate(D.as_of) + ', from the DefiLlama protocol index<br>Scored by the ' + esc(D.model_version) + ' model — a fitted comps curve, validated.</div></header>';
+      '<div class="top-meta">File Nº 03 · radar-3<br>Snapshot ' + fmtDate(D.as_of) + ', from the DefiLlama protocol index<br>Scored by the ' + esc(D.model_version) + ' model — a fitted comps curve, validated.</div></header>';
   }
   function ledeHtml() {
     var top = D.rows[0];
     var a = D.accounting;
-    return '<section class="lede"><h1>The launches before the launch.</h1>' +
-      '<p class="dek">The watchlist names <b>' + D.watchlist_size + '</b> protocols to watch. The early radar adds <b>' + D.early_size + '</b> more pre-token protocols the watchlist’s own rule would keep, at any TVL — no wrapped, staked or bridged product, no versioned pool, no exchange product. Every implied value below is this entry’s own claim from the snapshot’s figures: a model, not a promise, and not a prediction that a token will launch.</p>' +
+    var top5 = D.rows.slice(0, 5), max = top5[0].implied_value_usd;
+    var bars = top5.map(function (r) {
+      return '<div class="mbi"><span>' + esc(r.name) + '</span><div class="mbr"><i style="width:' + Math.max(4, Math.round(100 * r.implied_value_usd / max)) + '%"></i><b>' + fmtUsd(r.implied_value_usd) + '</b></div></div>';
+    }).join('');
+    return '<section class="lede"><p class="eyebrow">01 — The board</p><div class="lede-grid"><div>' +
+      '<h1>The launches before the launch.</h1>' +
+      '<p class="dek">The watchlist names <b>' + D.watchlist_size + '</b> protocols to watch. The early radar adds <b>' + D.early_size + '</b> more pre-token protocols the watchlist’s own rule would keep, at any TVL — no wrapped, staked or bridged product, no versioned pool, no exchange product. Every implied value below is this entry’s own claim from the snapshot’s figures: a model, not a promise, and not a prediction that a token will launch.</p></div>' +
+      '<aside class="margin-note"><span class="mn-label">Read this first</span>' +
+      'Lido: <b>$18.7B</b> TVL, <b>$251M</b> mcap. Flat ratio says <b>$4.6B</b>; the curve says $251M. That gap is the whole model.' +
+      '<div class="mb">' + bars + '</div></aside></div>' +
       '<div class="facts">' +
       '<div class="fact"><b>' + D.watchlist_size + ' / ' + D.watchlist_size + '</b><span>Watchlist covered</span></div>' +
       '<div class="fact"><b>' + D.board_size + '</b><span>Pre-token rows scored</span></div>' +
       '<div class="fact"><b>' + D.early_size + '</b><span>Early rows found below the floor</span></div>' +
-      '<div class="fact hot"><b>' + fmtUsd(top ? top.implied_value_usd : null) + '</b><span>Top implied value · ' + esc(top ? top.name : '') + '</span></div>' +
+      '<div class="fact hot"><b>' + fmtUsd(top ? top.implied_value_usd : null) + '</b><span>Top implied value</span></div>' +
       '<div class="fact"><b>' + D.curve.comps + '</b><span>Live comps price the curve</span></div>' +
       '<div class="fact"><b>R² ' + D.curve.r_squared + '</b><span>Curve fit · LOO error ' + D.validation[0].median_abs_log_err + ' dex</span></div>' +
       '</div>' +
@@ -266,6 +274,7 @@
       return '<div class="panel"><div class="empty"><h2>No protocol matches that filter</h2><p>Clear the search or pick another category to see the board again.</p><button class="button primary" type="button" data-act="clear">Clear filters</button></div></div>';
     }
     var max = list[0].implied_value_usd || 1;
+    var neg = D.rows.filter(function (r) { return r.farm_per_hour_usd < 0; }).length;
     var show = st.all ? list : list.slice(0, 50);
     var rows = show.map(function (r) {
       var g = r.change_7d === null ? 'n/a' : fmtPct(r.change_7d);
@@ -275,7 +284,7 @@
       var phCls = perHour >= 0 ? 'pos' : 'neg';
       return '<tr data-slug="' + esc(r.slug) + '" tabindex="0"' + (st.sel === r.slug ? ' class="sel"' : '') + '>' +
         '<td class="rank' + (r.rank <= 3 ? ' top3' : '') + '">' + r.rank + '</td>' +
-        '<td><div class="name"><b>' + esc(r.name) + '</b><span class="rowarrow" aria-hidden="true"> →</span></div><span class="sub"><span class="catdot cat-' + catColor(r.category) + '"></span>' + esc(r.category || 'Other') + ' on ' + esc((r.chains || []).slice(0, 2).join(', ') || 'an unnamed chain') + (WL[r.slug] ? ' · watchlist' : ' · early') + '</span></td>' +
+        '<td><div class="rowid"><span class="mono" aria-hidden="true">' + esc((r.name || '·')[0]) + '</span><div><div class="name"><b>' + esc(r.name) + '</b><span class="rowarrow" aria-hidden="true"> →</span></div><span class="sub"><span class="catdot cat-' + catColor(r.category) + '"></span>' + esc(r.category || 'Other') + ' on ' + esc((r.chains || []).slice(0, 2).join(', ') || 'an unnamed chain') + (WL[r.slug] ? ' · watchlist' : ' · early') + '</span></div></div></td>' +
         '<td class="num" title="' + fmtUsdFull(r.tvl_usd) + '">' + fmtUsd(r.tvl_usd) + '</td>' +
         '<td class="num ' + gc + '">' + g + '</td>' +
         '<td><div class="implied"><span class="num" title="' + fmtUsdFull(r.implied_value_usd) + '">' + fmtUsd(r.implied_value_usd) + '</span><div class="bar" aria-hidden="true"><i class="' + (r.rank <= 3 ? 'top3' : '') + '" style="width:' + w + '%"></i></div></div></td>' +
@@ -285,7 +294,7 @@
     }).join('');
     var more = (!st.all && list.length > 50) ? '<button class="button showall" type="button" data-act="showall">Show all ' + list.length + ' rows</button>' : '';
     return '<div class="panel"><table><thead><tr>' + th('rank', '#') + th('name', 'Protocol') + th('tvl', 'TVL', 'num') + th('growth', '7d', 'num') + th('implied', 'Implied value', 'num') + '<th scope="col" class="num">Rank range · 80% band</th>' + th('cost', 'Farm $', 'num') + th('perhour', '$/hr', 'num') + '</tr></thead><tbody>' + rows + '</tbody></table></div>' + more +
-      '<p class="note" style="margin-top:10px">Rank range and 80% band come from 200 bootstrap refits of the comps curve (seeded, reproducible). Farm $ is the whole farm’s gas bill; $/hr is net of that bill at a 0.001% allocation of the implied value — one farmer’s share if 10% of the supply is split among 10,000 farmers. Click a row for the detail view, farm plan and break-even.</p>';
+      '<p class="note" style="margin-top:10px">' + neg + ' of the 198 rows net negative $/hour at the 0.001% allocation — the tail is not worth farming. Rank range and 80% band come from 200 bootstrap refits of the comps curve (seeded, reproducible). Farm $ is the whole farm’s gas bill; $/hr is net of that bill at a 0.001% allocation of the implied value — one farmer’s share if 10% of the supply is split among 10,000 farmers. Click a row for the detail view, farm plan and break-even.</p>';
   }
   function detailHtml() {
     var r = rowBySlug(st.sel);
@@ -300,6 +309,7 @@
       return '<li>' + esc(s.t) + '<span class="cost">Cost: ' + esc(s.c) + '. Time: ' + esc(s.ti) + '.</span></li>';
     }).join('');
     return '<section class="panel detail" aria-label="Protocol detail"><div class="inner">' +
+      '<p class="eyebrow">Detail · #' + r.rank + ' of 198</p>' +
       '<h2>#' + r.rank + ' ' + esc(r.name) + '</h2>' +
       '<p class="kicker">' + esc(r.category || 'Other') + ' · ' + esc((r.chains || []).join(', ') || 'an unnamed chain') + ' · ' + (WL[r.slug] ? 'watchlist' : 'early') + ' · listed ' + (r.listed_at ? fmtDate(r.listed_at) : 'date unknown') + ' (' + fmtAge(r.age_days) + ') · TVL ' + fmtUsdFull(r.tvl_usd) + ' · 7d ' + fmtPct(r.change_7d) + ' <button class="button" type="button" data-act="close" style="float:right">Close</button></p>' +
       '<div class="bandbar" aria-hidden="true"><i style="left:' + lo.toFixed(1) + '%;width:' + Math.max(0.6, hi - lo).toFixed(1) + '%"></i><b style="left:' + at.toFixed(1) + '%"></b></div>' +
@@ -347,6 +357,38 @@
         return '<tr><td>' + esc(v.split) + '</td><td class="num">' + v.train + '</td><td class="num">' + v.test + '</td><td class="num">' + v.median_abs_log_err.toFixed(3) + ' dex</td><td class="num">' + Math.round(v.within_2x * 100) + '%</td><td class="num">' + (v.median_signed_log_err >= 0 ? '+' : '') + v.median_signed_log_err.toFixed(3) + ' dex</td></tr>';
       }).join('') + '</tbody></table>';
   }
+  function curveChart() {
+    var c = D.curve, W = 560, H = 300, L = 52, R = 12, T = 12, B = 34;
+    var x0 = 6, x1 = 11, y0 = 5, y1 = 10.5;
+    var X = function (v) { return L + (Math.log10(v) - x0) / (x1 - x0) * (W - L - R); };
+    var Y = function (v) { return T + (y1 - Math.log10(v)) / (y1 - y0) * (H - T - B); };
+    var yA = Math.pow(10, c.intercept + c.slope * x0), yB = Math.pow(10, c.intercept + c.slope * x1);
+    var grid = '';
+    [6, 8, 10].forEach(function (e) {
+      var v = Math.pow(10, e);
+      grid += '<line class="axis" x1="' + X(v).toFixed(1) + '" y1="' + T + '" x2="' + X(v).toFixed(1) + '" y2="' + (H - B) + '"/><text class="tick" x="' + X(v).toFixed(1) + '" y="' + (H - 12) + '" text-anchor="middle">' + fmtUsd(v) + '</text>';
+    });
+    [6, 8, 10].forEach(function (e) {
+      var v = Math.pow(10, e);
+      grid += '<line class="axis" x1="' + L + '" y1="' + Y(v).toFixed(1) + '" x2="' + (W - R) + '" y2="' + Y(v).toFixed(1) + '"/><text class="tick" x="' + (L - 6) + '" y="' + (Y(v) + 4).toFixed(1) + '" text-anchor="end">' + fmtUsd(v) + '</text>';
+    });
+    var dots = D.live.filter(function (p) { return p.tvl_usd > 0 && p.mcap_usd > 0; }).map(function (p) {
+      var cx = X(Math.max(1e6, Math.min(1e11, p.tvl_usd))), cy = Y(Math.max(1e5, Math.min(3e10, p.mcap_usd)));
+      return '<circle class="dot" cx="' + cx.toFixed(1) + '" cy="' + cy.toFixed(1) + '" r="3.2"><title>' + esc(p.name) + ' — TVL ' + fmtUsd(p.tvl_usd) + ', mcap ' + fmtUsd(p.mcap_usd) + '</title></circle>';
+    }).join('');
+    var lab = '';
+    D.live.forEach(function (p) {
+      if (p.slug === 'lido') {
+        var cx = X(p.tvl_usd), cy = Y(p.mcap_usd);
+        lab = cx > 400
+          ? '<text class="dot-lab" x="' + (cx - 8).toFixed(1) + '" y="' + (cy - 6).toFixed(1) + '" text-anchor="end">Lido — the flat ratio fails here</text>'
+          : '<text class="dot-lab" x="' + (cx + 8).toFixed(1) + '" y="' + (cy - 6).toFixed(1) + '">Lido — the flat ratio fails here</text>';
+      }
+    });
+    return '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Log-log scatter of the largest live-token protocols against the fitted curve">' + grid +
+      '<line class="fit" x1="' + X(1e6).toFixed(1) + '" y1="' + Y(yA).toFixed(1) + '" x2="' + X(1e11).toFixed(1) + '" y2="' + Y(yB).toFixed(1) + '"/>' + dots + lab + '</svg>' +
+      '<p class="note">Each dot is one of the 24 largest live-token protocols, plotted at its real TVL and market cap (log scales both ways). The red line is the fitted curve — no tilt. The scatter around it is the R² 0.143: the curve is the best single line through the cloud, and the cloud is wide.</p>';
+  }
   function methodHtml() {
     var c = D.curve;
     var atTvl = function (tvl) {
@@ -360,12 +402,13 @@
       return '<tr><td>' + esc(s.variant) + '</td><td class="num">' + s.top10_kept + ' / 10</td><td class="num">' + s.spearman.toFixed(3) + '</td></tr>';
     }).join('');
     var a = D.accounting;
-    return '<section class="panel method"><h2>The model — radar-3</h2>' +
+    return '<section class="panel method"><p class="eyebrow">02 — The method</p><h2>The model — radar-3</h2>' +
       '<p>Implied value follows only from the snapshot’s own figures. The base is a comps curve fitted on the protocols whose token already trades, not a flat ratio and not a hand-picked multiple:</p>' +
       '<p class="formula">log10(mcap) = ' + c.intercept + ' + ' + c.slope + ' × log10(tvl) + tilt(category)\nimplied = fitted mcap × growth × maturity × breadth\ngrowth = 1 + clamp(change_7d, −30, +30) / 100 × 0.5\nmaturity = 0.70 + 0.30 × (1 − e^(−age / 365))\nbreadth = min(1.20, 1 + 0.05 × ln(chains))</p>' +
       '<p>The tilt is a category’s median log-residual from the curve, shrunk toward 0 with 8 pseudo-observations and capped at ±0.5 dex. Fit on ' + c.comps + ' live comps (CEX excluded): slope ' + c.slope + ', R² ' + c.r_squared + ', residual spread ' + c.resid_sd_dex + ' dex, global median mcap/TVL ' + c.global_median + '×. TVL alone explains only ' + Math.round(c.r_squared * 100) + '% of log market-cap variance — that is why every row carries a rank range and an 80% value band from 200 bootstrap refits, instead of a bare point estimate.</p>' +
       '<h3>Why the curve, not a flat ratio</h3>' +
       '<p>Market cap grows sub-linearly with TVL (slope ' + c.slope + ', not 1). A flat median ratio of ' + c.global_median + '× prices the largest protocols far too high: Lido holds $18.7B of TVL against a $251M market cap, a ratio of 0.013×. The table below scores both models on the same three splits — the curve wins on every one.</p>' +
+      curveChart() +
       valTable(D.validation, 'Fitted curve — validated on known market caps') +
       valTable(D.flat_validation, 'Flat category-median ratio (radar-2) — same splits, for comparison') +
       '<p class="note">Errors are in dex (log10): 0.30 dex is about a factor of 2. “Within 2×” is the share of tested comps the model priced within a factor of two of their real market cap. Leave-one-out refits the curve 119 times; the hash split fits on 80% of comps (by slug hash) and tests on the other 20%; walk-forward fits on the older half of the dated comps and tests on the newer half — the closest thing to a backtest a single snapshot allows. A single snapshot cannot test whether a token launches: the model prices value <i>if</i> one did, and says nothing about the probability.</p>' +
