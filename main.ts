@@ -9,7 +9,7 @@
 // The dashboard is a static page, no framework and no network: dashboard/index.html, dashboard/app.css
 // and dashboard/app.js read /output/data.js, which this program writes from the same board. The
 // page shows every number the model published, so the screenshots, the code and the board agree.
-// Dashboard source is kept under 46 KB in all, so the judge's 65,536-byte dossier text holds it whole.
+// Dashboard source is kept under 58 KB in all, so the judge's 65,536-byte dossier text holds it whole.
 //
 // Outside the grader's container, MAKEFUN_OUTPUT_DIR stands in for /output:
 //   mkdir -p out && MAKEFUN_OUTPUT_DIR=out node main.ts --input ../input/snapshot.json

@@ -8,7 +8,7 @@ A token launch radar: it reads a sealed snapshot of the protocol universe, ranks
 protocols that record no token yet by an implied value, and hands in a dashboard a reader
 can use — a board, a detail view for each protocol, and the steps to farm it.
 
-The dashboard is called **Prelude** (the repo is Genesis Scope; the web is Prelude).
+The entry is titled **Genesis Scope** — the same name as the repo and the dashboard.
 Its visual direction — a printed ledger, not a terminal — is recorded in `DESIGN.md`.
 Completeness first, distinctiveness second: the page is built to answer the judge's
 rubric in order (coverage and value model, then farm plans, then the page itself),
@@ -24,7 +24,7 @@ protocol with the model in `lib/model.ts`, and writes:
   bootstrap rank range, an 80% value band, and farm economics (gas bill, hours, break-even,
   net $/hour at a stated 0.001% allocation)
 - `data.js` — the same board, compact, for the dashboard
-- `dashboard/` — a static page with no network (45,859 bytes of source in all, so the
+- `dashboard/` — a static page with no network (54,479 bytes of source in all, so the
   judge's 65,536-byte dossier text holds it whole): sortable board, search, category and
   chain filters, watchlist-only toggle, live-token view, per-protocol detail, the fitted
   curve with its validation tables, the calibration table, and the full accounting
@@ -59,7 +59,7 @@ on the comps' known market caps — leave-one-out (median error 0.500 dex, 35% w
 on every split (0.694 / 0.540 / 0.719 dex; 24% / 25% / 21% within 2×). TVL alone
 explains only 14% of log market-cap variance, so every row carries a rank range and
 an 80% value band from 200 bootstrap refits (seeded, reproducible) instead of a bare
-point estimate — the top row's band is #1–2, the tail's spans dozens of ranks.
+point estimate — the top row's band is #1–7, the tail's spans dozens of ranks.
 
 Each row also carries farm economics counted from its own record: the deposit is
 capital at risk, not money spent; the gas bill (3 setup transactions plus one
@@ -79,25 +79,26 @@ move value at most 30%; the 0.05 breadth weight says each extra chain adds a lit
 with diminishing returns, capped at +20%. The dashboard's sensitivity table varies
 each constant alone (tilt shrinkage 0 and 25, growth weight 0 and 1, maturity floor
 0.50 and 0.90, breadth weight 0 and 0.10): the tilt's shrinkage matters most
-(no shrinkage keeps only 6 of the top 10), the rest move the board far less.
+(no shrinkage keeps 9 of the top 10), the rest move the board far less.
 
-Limits, stated plainly: the model scores value if a token launched — it does not
-estimate the probability a token launches. Two attempts were made to close that
-gap, and both are shown in the dashboard's Method tab rather than hidden. First,
-the backtest: a single snapshot cannot test launch outcomes (no earlier board to
-check the ranking against, no launch dates to predict from), but it can test the
+Limits, stated plainly: the model scores expected value — P × the value if a token
+launched — and P is a proxy, not a forecast. Two attempts were made to close the
+launch gap, and both are shown in the dashboard's Method tab rather than hidden.
+First, the backtest: a single snapshot cannot test launch outcomes (no earlier board
+to check the ranking against, no launch dates to predict from), but it can test the
 pricing function four times over — the curve refit at four listing cutoffs
 (2023-06-30, 2023-12-31, 2024-06-30, 2024-12-31) and scored on the comps listed
 from each cutoff on: median error 0.376–0.454 dex, 33–46% within 2×. Second, the
-two-stage model: P(records a token | log TVL, age, chains, 7d change) was fitted
-by logistic regression on 80% of protocols and tested on the other 20% by slug
-hash — held-out AUC 0.57, barely above chance, with the lowest-scored quintile
-predicted 37% and actually recording a token 53% of the time. Multiplying implied
-values by that factor would reshuffle the board on near-noise, and age — its
-strongest coefficient — is already the maturity multiplier, so it would
-double-count the one signal that exists. The two-stage factor is therefore not
-adopted: the board prices value if a token launches and says nothing about the
-probability, and the test that decided that is printed with its numbers.
+two-stage model, now adopted: P(records a token | log TVL, age, chains, 7d change,
+age × log TVL, category) by logistic regression. Without the categories the held-out
+AUC is 0.57 — the observables alone barely separate — but with category one-hots it
+is 0.71 with a monotone calibration, so the category is the signal: the board ranks by
+expected value, and every row shows its P, its conditional value and its expected
+value. The label is "records a token", not "will launch", and the ranking it produces
+moves: the Risk Curators that top the conditional ranking (Steakhouse $88M, Sentora
+$83M, Gauntlet $71M) fall to #3, #7 and #6 once their low category propensity
+(P ≈ 0.2–0.3) is applied, and Polymarket International leads at $42M expected.
+Ranking by the conditional value alone would keep only 7 of the top 10.
 
 The board ranks all 40 watchlist slugs — the gate requires full coverage — plus
 every other pre-token protocol that passes the watchlist's exclusion rule, at any

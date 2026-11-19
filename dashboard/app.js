@@ -54,99 +54,59 @@
     return h % 6;
   }
   function logo(size) {
-    return '<svg viewBox="0 0 32 32" width="' + size + '" height="' + size + '" aria-hidden="true"><path d="M10 26 A16 16 0 0 1 26 10" fill="none" stroke="#1d1a16" stroke-width="1.25" opacity="0.4"/><path d="M6 26 A20 20 0 0 1 26 6" fill="none" stroke="#c2401b" stroke-width="2.5"/><line x1="3" y1="26" x2="29" y2="26" stroke="#1d1a16" stroke-width="2" stroke-linecap="round"/><circle cx="26" cy="6" r="2.8" fill="#c2401b"/></svg>';
+    return '<svg viewBox="0 0 32 32" width="' + size + '" height="' + size + '" aria-hidden="true"><path d="M10 26 A16 16 0 0 1 26 10" fill="none" style="stroke:var(--ink)" stroke-width="1.25" opacity="0.4"/><path d="M6 26 A20 20 0 0 1 26 6" fill="none" style="stroke:var(--signal)" stroke-width="2.5"/><line x1="3" y1="26" x2="29" y2="26" style="stroke:var(--ink)" stroke-width="2" stroke-linecap="round"/><circle cx="26" cy="6" r="2.8" style="fill:var(--signal)"/></svg>';
   }
 
-  // ---- farm plan (same derivation as lib/model.ts: category, chains, TVL, age) ----
-  function capitalFor(r) {
-    if (r.tvl_usd >= 1e9) return 250;
-    if (r.tvl_usd >= 1e8) return 150;
-    if (r.tvl_usd >= 2.5e7) return 100;
-    return 50;
+  // FLIP for sort/filter: measure the visible rows, re-render, then slide each
+  // surviving row from its old position to its new one. Transform-only, 220ms,
+  // only the rows on screen; rows that appear or vanish are left alone.
+  function rowTops() {
+    var m = {}, rows = document.querySelectorAll('tbody tr[data-slug]');
+    for (var i = 0; i < rows.length; i++) m[rows[i].getAttribute('data-slug')] = rows[i].getBoundingClientRect().top;
+    return m;
   }
-  function holdDaysFor(age) {
-    if (age === null || age === undefined) return 60;
-    if (age < 180) return 90;
-    if (age < 365) return 60;
-    return 30;
+  function flipRender() {
+    if (!window.matchMedia('(prefers-reduced-motion: no-preference)').matches) { render(); return; }
+    var before = rowTops();
+    render();
+    var rows = document.querySelectorAll('tbody tr[data-slug]');
+    for (var i = 0; i < rows.length; i++) {
+      var slug = rows[i].getAttribute('data-slug');
+      if (!(slug in before)) continue;
+      var d = before[slug] - rows[i].getBoundingClientRect().top;
+      if (!d) continue;
+      rows[i].style.transition = 'none';
+      rows[i].style.transform = 'translateY(' + d + 'px)';
+      void rows[i].offsetHeight;
+      rows[i].style.transition = 'transform var(--dur-2) var(--ease-out), background-color var(--dur-1) var(--ease-out)';
+      rows[i].style.transform = '';
+    }
   }
-  function gasFor(chain) {
-    var c = (chain || '').toLowerCase();
-    if (c === 'ethereum') return 'about $8 to $20 of gas';
-    if (c === 'solana' || c === 'sui' || c === 'aptos' || c === 'tron') return 'under $0.50 of gas';
-    if (c === 'bitcoin' || c === 'bittensor') return 'about $2 to $5 of gas';
-    return 'about $0.50 to $2 of gas';
+
+  // Count-up for the KPI strip, once on load: the final values already sit in
+  // the markup, so a screenshot at any moment shows a real number. The count
+  // runs 360ms, ease-out cubic (the JS twin of --ease-out), gated on
+  // no-preference; it never runs again on sort or filter.
+  function countUp(el) {
+    var text = el.textContent;
+    var parts = text.split(/(\d+(?:\.\d+)?)/g);
+    var nums = [];
+    for (var i = 1; i < parts.length; i += 2) {
+      nums.push({ i: i, target: parseFloat(parts[i]), dec: (parts[i].split('.')[1] || '').length });
+    }
+    if (!nums.length) return;
+    var t0 = null;
+    function tick(t) {
+      if (t0 === null) t0 = t;
+      var p = Math.min(1, (t - t0) / 360), e = 1 - Math.pow(1 - p, 3);
+      var out = parts.slice();
+      for (var j = 0; j < nums.length; j++) out[nums[j].i] = (nums[j].target * e).toFixed(nums[j].dec);
+      el.textContent = out.join('');
+      if (p < 1) requestAnimationFrame(tick);
+    }
+    requestAnimationFrame(tick);
   }
-  function gasMid(chain) {
-    var c = (chain || '').toLowerCase();
-    if (c === 'ethereum') return 14;
-    if (c === 'solana' || c === 'sui' || c === 'aptos' || c === 'tron') return 0.25;
-    if (c === 'bitcoin' || c === 'bittensor') return 3.5;
-    return 1.25;
-  }
-  function actionFor(r, cap, chain) {
-    var c = (r.category || '').toLowerCase(), n = r.name;
-    if (/lend|cdp|collateral/.test(c)) return 'Supply $' + cap + ' of USDC to ' + n + ' on ' + chain + ' and keep the position open.';
-    if (/dex|yield|leveraged farm|liquidity manager/.test(c)) return 'Provide $' + cap + ' of liquidity to ' + n + "'s main pool on " + chain + ' and keep the position open.';
-    if (/bridge/.test(c)) return 'Bridge $' + cap + ' of USDC to ' + chain + ' through ' + n + ' and use the bridged funds in its app.';
-    if (/staking|restak/.test(c)) return "Stake $" + cap + " of the chain's staking asset through " + n + ' and keep the receipt.';
-    if (/perpetual|derivative|basis trading/.test(c)) return 'Deposit $' + cap + ' of USDC as margin on ' + n + ' and open one small hedged position.';
-    if (/prediction/.test(c)) return 'Fund $' + cap + ' and place one market position on ' + n + '.';
-    if (/curator|allocator|risk/.test(c)) return 'Deposit $' + cap + ' into a ' + n + ' vault on ' + chain + ' and keep the shares.';
-    if (/stable/.test(c)) return 'Mint or deposit $' + cap + ' of the stable asset through ' + n + ' on ' + chain + '.';
-    if (/rwa/.test(c)) return "Mint $" + cap + " of " + n + "'s yield asset on " + chain + ' and hold it.';
-    if (/insurance/.test(c)) return 'Buy $' + cap + ' of cover from ' + n + ' on ' + chain + ' and keep the policy.';
-    if (/payment/.test(c)) return 'Pay $' + cap + ' through ' + n + ' on ' + chain + ' and keep the receipt.';
-    if (/governance/.test(c)) return "Deposit $" + cap + " into " + n + "'s governance vault on " + chain + ' and vote once.';
-    if (/farm/.test(c)) return 'Deposit $' + cap + ' of USDC into ' + n + "'s farm on " + chain + ' and keep the position open.';
-    if (/anchor btc|decentralized btc/.test(c)) return 'Mint $' + cap + ' of the BTC-pegged asset through ' + n + ' on ' + chain + ' and hold it.';
-    if (/cedefi/.test(c)) return 'Deposit $' + cap + ' into a ' + n + ' vault on ' + chain + ' and keep the shares.';
-    if (c === 'chain') return 'Bridge $' + cap + ' of USDC to ' + chain + " and use it in " + n + "'s app.";
-    return 'Put $' + cap + ' of USDC to work in ' + n + ' on ' + chain + ' and keep the position open.';
-  }
-  function secondActionFor(r, cap, chain) {
-    var c = (r.category || '').toLowerCase(), n = r.name, small = Math.max(10, Math.round(cap / 5));
-    if (/lend|cdp|collateral/.test(c)) return 'Borrow $' + small + ' against the deposit on ' + n + ', then repay it the same week.';
-    if (/dex|yield|leveraged farm|liquidity manager/.test(c)) return 'Swap $' + small + ' through ' + n + ' on ' + chain + ' so the wallet shows trading activity as well as liquidity.';
-    if (/bridge/.test(c)) return 'Bridge a second, smaller amount back through ' + n + ' so the wallet shows two-way use.';
-    if (/perpetual|derivative|basis trading/.test(c)) return 'Close the hedge on ' + n + ' and open a fresh one half its size, so the wallet shows repeat use.';
-    if (/prediction/.test(c)) return 'Settle the first market position on ' + n + ' and open a second one on a different market.';
-    if (/curator|allocator|risk/.test(c)) return 'Move $' + small + ' into a second ' + n + ' vault on ' + chain + ' to show more than one allocation.';
-    if (/governance/.test(c)) return 'Vote on a second ' + n + ' proposal and leave a short comment in its forum.';
-    if (/rwa/.test(c)) return 'Mint $' + small + ' of a second yield asset on ' + n + ' on ' + chain + ' so the wallet holds more than one position.';
-    if (/staking|restak/.test(c)) return 'Delegate $' + small + ' to a second validator or operator through ' + n + ' on ' + chain + '.';
-    if (/stable/.test(c)) return 'Convert $' + small + ' between the stable asset and its wrapped form through ' + n + ' on ' + chain + '.';
-    if (/cedefi/.test(c)) return 'Move $' + small + ' into a second ' + n + ' vault on ' + chain + ' to show more than one allocation.';
-    if (/farm/.test(c)) return 'Harvest the farm rewards on ' + n + ' and compound them back into the position.';
-    if (/anchor btc|decentralized btc/.test(c)) return 'Redeem $' + small + ' of the BTC-pegged asset through ' + n + ' and mint it again, so the wallet shows two-way use.';
-    if (/insurance/.test(c)) return 'Buy $' + small + ' of cover for a second asset from ' + n + ' on ' + chain + '.';
-    if (/payment/.test(c)) return 'Pay a second, smaller amount through ' + n + ' on ' + chain + ' so the wallet shows repeat use.';
-    if (/crypto card/.test(c)) return 'Load $' + small + ' onto the ' + n + ' card and make one small purchase with it.';
-    return 'Add $' + small + ' to the position on ' + n + ' so the wallet shows repeat use, not a single deposit.';
-  }
-  function farmSteps(r) {
-    var chain = (r.chains && r.chains[0]) || 'its main chain';
-    var cap = capitalFor(r), hold = holdDaysFor(r.age_days), gas = gasFor(chain);
-    var second = r.chains && r.chains[1];
-    var depth = second
-      ? { t: 'Repeat the core position on ' + second + ' as well, with about half the capital, so the activity spans two chains.', c: 'about $' + Math.round(cap / 2) + ' of capital and ' + gas, ti: '20 minutes to set up' }
-      : { t: 'After two weeks, add $' + Math.max(10, Math.round(cap / 4)) + ' to the position on ' + r.name + ' so the wallet shows growing use, not a single deposit.', c: 'about $' + Math.max(10, Math.round(cap / 4)) + ' of capital and ' + gas, ti: '10 minutes' };
-    return [
-      { t: 'Use a fresh wallet that holds only the funds you plan to farm, and keep its seed phrase offline.', c: gas, ti: '5 minutes' },
-      { t: actionFor(r, cap, chain), c: '$' + cap + ' of capital and ' + gas, ti: '15 minutes to set up' },
-      { t: secondActionFor(r, cap, chain), c: 'about $' + Math.max(10, Math.round(cap / 5)) + ' of capital and ' + gas, ti: '10 minutes' },
-      depth,
-      { t: 'Make one qualifying action each week on ' + r.name + ', such as a deposit, a borrow, a swap or a vote, and never let two weeks pass with no activity.', c: gas + ' a week', ti: '10 minutes a week' },
-      { t: 'Hold the position for at least ' + hold + ' days so the activity is counted in more than one snapshot.', c: 'the $' + cap + ' stays in the position', ti: hold + ' days' },
-      { t: "Before you withdraw, open " + r.name + "'s own points or rewards page and claim only from the link it publishes; never pay a fee to claim and never follow a claim link from a chat or an ad.", c: 'no fee to check, and never pay to claim', ti: '10 minutes' },
-      { t: 'Write the wallet, the dates and every transaction hash in a farm log so you can repeat the position or unwind it.', c: 'nothing but the log', ti: '5 minutes' }
-    ];
-  }
-  function farmEcon(r) {
-    var hold = holdDaysFor(r.age_days), weeks = Math.ceil(hold / 7);
-    var tx = 3 + weeks;
-    return { cap: capitalFor(r), hold: hold, weeks: weeks, tx: tx, gasMid: gasMid((r.chains && r.chains[0]) || ''), gas: r.farm_cost_usd, hours: r.farm_hours };
-  }
+
   function scenario(r, sharePct) {
     var alloc = (sharePct / 100) * r.implied_value_usd;
     var net = alloc - r.farm_cost_usd;
@@ -192,6 +152,7 @@
       else if (k === 'cost') { av = a.farm_cost_usd; bv = b.farm_cost_usd; }
       else if (k === 'perhour') { av = a.farm_per_hour_usd; bv = b.farm_per_hour_usd; }
       else if (k === 'name') { av = a.name.toLowerCase(); bv = b.name.toLowerCase(); }
+      else if (k === 'rank') { av = a.rank; bv = b.rank; }
       else { av = a.implied_value_usd; bv = b.implied_value_usd; }
       if (av < bv) return -st.dir;
       if (av > bv) return st.dir;
@@ -205,22 +166,22 @@
 
   function th(key, label, cls) {
     var arrow = st.sort === key ? (st.dir > 0 ? ' ▴' : ' ▾') : '';
-    return '<th scope="col"' + (cls ? ' class="' + cls + '"' : '') + '><button type="button" data-act="sort" data-key="' + key + '" style="all:unset;cursor:pointer">' + label + arrow + '</button></th>';
+    return '<th scope="col"' + (cls ? ' class="' + cls + '"' : '') + '><button type="button" data-act="sort" data-key="' + key + '" class="sortbtn">' + label + arrow + '</button></th>';
   }
   function headerHtml() {
     return '<header class="top"><div class="brand"><span>' + logo(28) + '</span><span class="brand-name">Genesis Scope</span><span class="brand-tag">Pre-token protocols, ranked</span></div>' +
-      '<div class="top-meta">File Nº 03 · radar-3<br>Snapshot ' + fmtDate(D.as_of) + ', from the DefiLlama protocol index<br>Scored by the ' + esc(D.model_version) + ' model — a fitted comps curve, validated.</div></header>';
+      '<div class="top-meta"><div class="rec"><span>File</span> Nº 03 · ' + esc(D.model_version) + '</div><div class="rec"><span>Snapshot</span> ' + fmtDate(D.as_of) + ' · DefiLlama protocol index</div><div class="rec"><span>Model</span> fitted comps curve, validated</div></div></header>';
   }
   function ledeHtml() {
     var top = D.rows[0];
     var a = D.accounting;
     var top5 = D.rows.slice(0, 5), max = top5[0].implied_value_usd;
     var bars = top5.map(function (r) {
-      return '<div class="mbi"><span>' + esc(r.name) + '</span><div class="mbr"><i style="width:' + Math.max(4, Math.round(100 * r.implied_value_usd / max)) + '%"></i><b>' + fmtUsd(r.implied_value_usd) + '</b></div></div>';
+      return '<div class="mbi"><span>' + esc(r.name) + '</span><div class="mbr"><span class="track"><i style="width:' + Math.max(4, Math.round(100 * r.implied_value_usd / max)) + '%"></i></span><b>' + fmtUsd(r.implied_value_usd) + '</b></div></div>';
     }).join('');
-    return '<section class="lede"><p class="eyebrow">01 — The board</p><div class="lede-grid"><div>' +
+    return '<section class="lede"><p class="eyebrow"><span class="mark">' + logo(13) + '</span>01 — The board</p><div class="lede-grid"><div>' +
       '<h1>The launches before the launch.</h1>' +
-      '<p class="dek">The watchlist names <b>' + D.watchlist_size + '</b> protocols to watch. The early radar adds <b>' + D.early_size + '</b> more pre-token protocols the watchlist’s own rule would keep, at any TVL — no wrapped, staked or bridged product, no versioned pool, no exchange product. Every implied value below is this entry’s own claim from the snapshot’s figures: a model, not a promise, and not a prediction that a token will launch.</p></div>' +
+      '<p class="dek">The watchlist names <b>' + D.watchlist_size + '</b> protocols to watch. The early radar adds <b>' + D.early_size + '</b> more pre-token protocols the watchlist’s own rule would keep, at any TVL — no wrapped, staked or bridged product, no versioned pool, no exchange product. Every implied value below is this entry’s own claim from the snapshot’s figures: an expected value — the value if a token launches, times the fitted chance one is recorded — a model, not a promise.</p></div>' +
       '<aside class="margin-note"><span class="mn-label">Read this first</span>' +
       'Lido: <b>$18.7B</b> TVL, <b>$251M</b> mcap. Flat ratio says <b>$4.6B</b>; the curve says $251M. That gap is the whole model.' +
       '<div class="mb">' + bars + '</div></aside></div>' +
@@ -276,7 +237,7 @@
   function boardHtml() {
     var list = sortedRows(shownRows());
     if (list.length === 0) {
-      return '<div class="panel"><div class="empty"><h2>No protocol matches that filter</h2><p>Clear the search or pick another category to see the board again.</p><button class="button primary" type="button" data-act="clear">Clear filters</button></div></div>';
+      return '<div class="panel"><div class="empty"><span class="mark">' + logo(28) + '</span><h2>No protocol matches that filter</h2><p>Clear the search or pick another category to see the board again.</p><button class="button primary" type="button" data-act="clear">Clear filters</button></div></div>';
     }
     var max = list[0].implied_value_usd || 1;
     var neg = D.rows.filter(function (r) { return r.farm_per_hour_usd < 0; }).length;
@@ -298,25 +259,26 @@
         '<td class="num ' + phCls + '" title="Net $/hour at a 0.001% allocation of implied value">' + fmtMoney(perHour) + '</td></tr>';
     }).join('');
     var more = (!st.all && list.length > 50) ? '<button class="button showall" type="button" data-act="showall">Show all ' + list.length + ' rows</button>' : '';
-    return '<div class="panel"><table><thead><tr>' + th('rank', '#') + th('name', 'Protocol') + th('tvl', 'TVL', 'num') + th('growth', '7d', 'num') + th('implied', 'Implied value', 'num') + '<th scope="col" class="num">Rank range · 80% band</th>' + th('cost', 'Farm $', 'num') + th('perhour', '$/hr', 'num') + '</tr></thead><tbody>' + rows + '</tbody></table></div>' + more +
-      '<p class="note" style="margin-top:10px">' + neg + ' of the 198 rows net negative $/hour at the 0.001% allocation — the tail is not worth farming. Rank range and 80% band come from 200 bootstrap refits of the comps curve (seeded, reproducible). Farm $ is the whole farm’s gas bill; $/hr is net of that bill at a 0.001% allocation of the implied value — one farmer’s share if 10% of the supply is split among 10,000 farmers. Click a row for the detail view, farm plan and break-even.</p>';
+    return '<div class="panel"><div class="scrollx wide"><table><thead><tr>' + th('rank', '#') + th('name', 'Protocol') + th('tvl', 'TVL', 'num') + th('growth', '7d', 'num') + th('implied', 'Implied value', 'num') + '<th scope="col" class="num">Rank range · 80% band</th>' + th('cost', 'Farm $', 'num') + th('perhour', '$/hr', 'num') + '</tr></thead><tbody>' + rows + '</tbody></table></div></div>' + more +
+      '<p class="note" style="margin-top:10px">' + neg + ' of the ' + D.board_size + ' rows net negative $/hour at the 0.001% allocation — the tail is not worth farming. Rank range and 80% band come from 200 bootstrap refits of the comps curve (seeded, reproducible). Farm $ is the whole farm’s gas bill; $/hr is net of that bill at a 0.001% allocation of the implied value — one farmer’s share if 10% of the supply is split among 10,000 farmers. Click a row for the detail view, farm plan and break-even.</p>';
   }
   function detailHtml() {
     var r = rowBySlug(st.sel);
     if (!r) return '';
-    var e = farmEcon(r);
     var cal = null;
     for (var i = 0; i < D.calibration.length; i++) if (D.calibration[i].category === (r.category || 'Other')) cal = D.calibration[i];
     var lo = Math.max(0, (r.rank_lo / D.board_size) * 100), hi = Math.min(100, (r.rank_hi / D.board_size) * 100), at = (r.rank / D.board_size) * 100;
     var beN = r.farm_cost_usd > 0 ? Math.round(r.implied_value_usd / r.farm_cost_usd) : 0;
     var scen = [0.001, 0.005, 0.01].map(function (s) { return scenario(r, s); });
-    var steps = farmSteps(r).map(function (s) {
-      return '<li>' + esc(s.t) + '<span class="cost">Cost: ' + esc(s.c) + '. Time: ' + esc(s.ti) + '.</span></li>';
+    var ch = r.chains || [];
+    var chainTxt = ch.length > 3 ? ch.slice(0, 3).join(', ') + ' + ' + (ch.length - 3) + ' more' : (ch.join(', ') || 'an unnamed chain');
+    var steps = r.farm_step_parts.map(function (s) {
+      return '<li>' + esc(s.text) + '<span class="cost">Cost: ' + esc(s.cost) + '. Time: ' + esc(s.time) + '.</span></li>';
     }).join('');
     return '<section class="panel detail" aria-label="Protocol detail"><div class="inner">' +
-      '<p class="eyebrow">Detail · #' + r.rank + ' of 198</p>' +
+      '<p class="eyebrow"><span class="mark">' + logo(13) + '</span>Detail · #' + r.rank + ' of ' + D.board_size + '</p>' +
       '<h2>#' + r.rank + ' ' + esc(r.name) + '</h2>' +
-      '<p class="kicker">' + esc(r.category || 'Other') + ' · ' + esc((r.chains || []).join(', ') || 'an unnamed chain') + ' · ' + (WL[r.slug] ? 'watchlist' : 'early') + ' · listed ' + (r.listed_at ? fmtDate(r.listed_at) : 'date unknown') + ' (' + fmtAge(r.age_days) + ') · TVL ' + fmtUsdFull(r.tvl_usd) + ' · 7d ' + fmtPct(r.change_7d) + ' <button class="button" type="button" data-act="close" style="float:right">Close</button></p>' +
+      '<p class="kicker">' + esc(r.category || 'Other') + ' · ' + esc(chainTxt) + ' · ' + (WL[r.slug] ? 'watchlist' : 'early') + ' · listed ' + (r.listed_at ? fmtDate(r.listed_at) : 'date unknown') + ' (' + fmtAge(r.age_days) + ') · TVL ' + fmtUsdFull(r.tvl_usd) + ' · 7d ' + fmtPct(r.change_7d) + ' <button class="button" type="button" data-act="close" style="float:right">Close</button></p>' +
       '<div class="bandbar" aria-hidden="true"><i style="left:' + lo.toFixed(1) + '%;width:' + Math.max(0.6, hi - lo).toFixed(1) + '%"></i><b style="left:' + at.toFixed(1) + '%"></b></div>' +
       '<p class="note">Rank ' + r.rank + ' of ' + D.board_size + ' · bootstrap rank range #' + r.rank_lo + '–' + r.rank_hi + ' · 80% value band ' + fmtUsd(r.value_lo_usd) + '–' + fmtUsd(r.value_hi_usd) + '.</p>' +
       '<div class="cols"><div><h3>How the value is built</h3><table class="kv">' +
@@ -325,17 +287,19 @@
       '<tr><td>Growth multiplier</td><td>' + r.growth_multiplier.toFixed(4) + '×</td></tr>' +
       '<tr><td>Maturity multiplier</td><td>' + r.maturity_multiplier.toFixed(4) + '×</td></tr>' +
       '<tr><td>Breadth multiplier</td><td>' + r.breadth_multiplier.toFixed(4) + '×</td></tr>' +
-      '<tr><td><b>Implied value</b></td><td><b>' + fmtUsdFull(r.implied_value_usd) + '</b></td></tr>' +
+      '<tr><td>Value if a token launches</td><td>' + fmtUsdFull(r.conditional_value_usd) + '</td></tr>' +
+      '<tr><td>Launch propensity</td><td>' + Math.round(r.launch_propensity * 100) + '%</td></tr>' +
+      '<tr><td><b>Implied value (expected)</b></td><td><b>' + fmtUsdFull(r.implied_value_usd) + '</b></td></tr>' +
       (cal ? '<tr><td>Category comps (' + esc(cal.category) + ')</td><td>' + cal.comps + '</td></tr>' +
         '<tr><td>Category median ratio</td><td>' + cal.median_ratio.toFixed(3) + '×</td></tr>' +
         '<tr><td>Fitted multiple at $100M TVL</td><td>' + cal.multiple_at_100m.toFixed(3) + '×</td></tr>' : '') +
       '</table></div>' +
       '<div><h3>What farming it costs</h3><table class="kv">' +
-      '<tr><td>Deposit deployed</td><td>$' + e.cap + '</td></tr>' +
-      '<tr><td>Gas per transaction</td><td>$' + e.gasMid.toFixed(2) + '</td></tr>' +
-      '<tr><td>Transactions</td><td>' + e.tx + ' (' + e.weeks + ' weekly)</td></tr>' +
+      '<tr><td>Deposit deployed</td><td>$' + r.farm_capital_usd + '</td></tr>' +
+      '<tr><td>Gas per transaction</td><td>$' + r.farm_gas_mid_usd.toFixed(2) + '</td></tr>' +
+      '<tr><td>Transactions</td><td>' + r.farm_tx_count + ' (' + r.farm_weeks + ' weekly)</td></tr>' +
       '<tr><td><b>Gas bill, whole farm</b></td><td><b>$' + r.farm_cost_usd.toFixed(2) + '</b></td></tr>' +
-      '<tr><td>Hands-on time</td><td>' + r.farm_hours.toFixed(2) + ' h over ' + e.hold + ' days</td></tr>' +
+      '<tr><td>Hands-on time</td><td>' + r.farm_hours.toFixed(2) + ' h over ' + r.farm_hold_days + ' days</td></tr>' +
       '<tr><td>Break-even allocation</td><td>$' + r.farm_cost_usd.toFixed(2) + ' · 1 in ' + beN.toLocaleString('en-US') + '</td></tr>' +
       '<tr><td>Net $/hour at 0.001%</td><td>' + fmtMoney(r.farm_per_hour_usd) + '</td></tr>' +
       '</table><p class="note">The deposit comes back on exit — it is capital at risk, not money spent. Only the gas bill is spent.</p></div></div>' +
@@ -353,14 +317,14 @@
       return '<tr><td class="rank">' + (i + 1) + '</td><td><b>' + esc(p.name) + '</b><span class="sub"><span class="catdot cat-' + catColor(p.category) + '"></span>' + esc(p.category || 'Other') + ' on ' + esc((p.chains || []).slice(0, 2).join(', ') || 'an unnamed chain') + '</span></td>' +
         '<td class="num">' + fmtUsd(p.tvl_usd) + '</td><td class="num">' + fmtUsd(p.mcap_usd) + '</td><td class="num">' + (p.mcap_tvl_ratio === null ? 'n/a' : p.mcap_tvl_ratio.toFixed(3) + '×') + '</td><td class="num">' + fmtPct(p.change_7d) + '</td></tr>';
     }).join('');
-    return '<div class="panel"><table><thead><tr><th scope="col">#</th><th scope="col">Protocol</th><th scope="col" class="num">TVL</th><th scope="col" class="num">Market cap</th><th scope="col" class="num">Mcap / TVL</th><th scope="col" class="num">7d</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
-      '<p class="note" style="margin-top:10px">The ' + D.live.length + ' largest live-token protocols by market cap, shown with the market’s own values — never mixed into the ranked board. These are the comps the curve is fitted on (119 in all, CEX excluded).</p>';
+    return '<div class="panel"><div class="scrollx wide"><table><thead><tr><th scope="col">#</th><th scope="col">Protocol</th><th scope="col" class="num">TVL</th><th scope="col" class="num">Market cap</th><th scope="col" class="num">Mcap / TVL</th><th scope="col" class="num">7d</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>' +
+      '<p class="note" style="margin-top:10px">The ' + D.live.length + ' largest live-token protocols by market cap, shown with the market’s own values — never mixed into the ranked board. The curve is fitted on ' + D.curve.comps + ' live comps in all (CEX excluded); these ' + D.live.length + ' are the largest of them.</p>';
   }
   function valTable(rows, title) {
-    return '<h3>' + title + '</h3><table><thead><tr><th scope="col">Split</th><th scope="col" class="num">Fit on</th><th scope="col" class="num">Tested on</th><th scope="col" class="num">Median |error|</th><th scope="col" class="num">Within 2×</th><th scope="col" class="num">Median signed error</th></tr></thead><tbody>' +
+    return '<h3>' + title + '</h3><div class="scrollx"><table><thead><tr><th scope="col">Split</th><th scope="col" class="num">Fit on</th><th scope="col" class="num">Tested on</th><th scope="col" class="num">Median |error|</th><th scope="col" class="num">Within 2×</th><th scope="col" class="num">Median signed error</th></tr></thead><tbody>' +
       rows.map(function (v) {
         return '<tr><td>' + esc(v.split) + '</td><td class="num">' + v.train + '</td><td class="num">' + v.test + '</td><td class="num">' + v.median_abs_log_err.toFixed(3) + ' dex</td><td class="num">' + Math.round(v.within_2x * 100) + '%</td><td class="num">' + (v.median_signed_log_err >= 0 ? '+' : '') + v.median_signed_log_err.toFixed(3) + ' dex</td></tr>';
-      }).join('') + '</tbody></table>';
+      }).join('') + '</tbody></table></div>';
   }
   function curveChart() {
     var c = D.curve, W = 560, H = 300, L = 52, R = 12, T = 12, B = 34;
@@ -411,9 +375,10 @@
       return '<tr><td>' + esc(s.variant) + '</td><td class="num">' + s.top10_kept + ' / 10</td><td class="num">' + s.spearman.toFixed(3) + '</td></tr>';
     }).join('');
     var a = D.accounting;
-    return '<section class="panel method"><p class="eyebrow">02 — The method</p><h2>The model — radar-3</h2>' +
-      '<p>Implied value follows only from the snapshot’s own figures. The base is a comps curve fitted on the protocols whose token already trades, not a flat ratio and not a hand-picked multiple:</p>' +
-      '<p class="formula">log10(mcap) = ' + c.intercept + ' + ' + c.slope + ' × log10(tvl) + tilt(category)\nimplied = fitted mcap × growth × maturity × breadth\ngrowth = 1 + clamp(change_7d, −30, +30) / 100 × 0.5\nmaturity = 0.70 + 0.30 × (1 − e^(−age / 365))\nbreadth = min(1.20, 1 + 0.05 × ln(chains))</p>' +
+    return '<section class="panel method"><p class="eyebrow"><span class="mark">' + logo(13) + '</span>02 — The method</p><h2>The model — radar-3</h2>' +
+      '<p>Implied value follows only from the snapshot’s own figures. The base is a comps curve fitted on the protocols whose token already trades, not a flat ratio and not a hand-picked multiple — and the board ranks by the <i>expected</i> value: that fitted value times P, the fitted chance the protocol records a token (the second stage below).</p>' +
+      '<p class="note">To the reader: this board is a claim, not a promise. It ranks pre-token protocols by expected value from a two-stage model — a fitted comps curve, then a launch propensity — validated leave-one-out, out-of-sample and walk-forward; P is a proxy for “records a token”, not a forecast that a token will launch.</p>' +
+      '<p class="formula">log10(mcap) = ' + c.intercept + ' + ' + c.slope + ' × log10(tvl) + tilt(category)\nimplied = fitted mcap × growth × maturity × breadth\nexpected = P × implied — the board’s ranking value\ngrowth = 1 + clamp(change_7d, −30, +30) / 100 × 0.5\nmaturity = 0.70 + 0.30 × (1 − e^(−age / 365))\nbreadth = min(1.20, 1 + 0.05 × ln(chains))</p>' +
       '<p>The tilt is a category’s median log-residual from the curve, shrunk toward 0 with 8 pseudo-observations and capped at ±0.5 dex. Fit on ' + c.comps + ' live comps (CEX excluded): slope ' + c.slope + ', R² ' + c.r_squared + ', residual spread ' + c.resid_sd_dex + ' dex, global median mcap/TVL ' + c.global_median + '×. TVL alone explains only ' + Math.round(c.r_squared * 100) + '% of log market-cap variance — that is why every row carries a rank range and an 80% value band from 200 bootstrap refits, instead of a bare point estimate.</p>' +
       '<h3>Why the curve, not a flat ratio</h3>' +
       '<p>Market cap grows sub-linearly with TVL (slope ' + c.slope + ', not 1). A flat median ratio of ' + c.global_median + '× prices the largest protocols far too high: Lido holds $18.7B of TVL against a $251M market cap, a ratio of 0.013×. The table below scores both models on the same three splits — the curve wins on every one.</p>' +
@@ -421,21 +386,26 @@
       valTable(D.validation, 'Fitted curve — validated on known market caps') +
       valTable(D.flat_validation, 'Flat category-median ratio (radar-2) — same splits, for comparison') +
       '<h3>Rolling walk-forward — the backtest a single snapshot allows</h3>' +
-      '<table><thead><tr><th scope="col">Cutoff</th><th scope="col" class="num">Fit on</th><th scope="col" class="num">Tested on</th><th scope="col" class="num">Median |error|</th><th scope="col" class="num">Within 2×</th></tr></thead><tbody>' +
+      '<div class="scrollx"><table><thead><tr><th scope="col">Cutoff</th><th scope="col" class="num">Fit on</th><th scope="col" class="num">Tested on</th><th scope="col" class="num">Median |error|</th><th scope="col" class="num">Within 2×</th></tr></thead><tbody>' +
       D.walk_forward_rolling.map(function (v) {
         return '<tr><td>Listings before ' + esc(v.cutoff) + '</td><td class="num">' + v.train + '</td><td class="num">' + v.test + '</td><td class="num">' + v.median_abs_log_err.toFixed(3) + ' dex</td><td class="num">' + Math.round(v.within_2x * 100) + '%</td></tr>';
-      }).join('') + '</tbody></table>' +
+      }).join('') + '</tbody></table></div>' +
       '<p class="note">Each row refits the curve on the comps listed before the cutoff and tests it on the comps listed from it on — the pricing function, fit on the past, scored on the future. The error stays in the ' + rollMin.toFixed(3) + '–' + rollMax.toFixed(3) + ' dex band (' + Math.round(rollWMin * 100) + '–' + Math.round(rollWMax * 100) + '% within 2×) across all four cutoffs. That is the backtest a single snapshot allows: it cannot test whether a token launches, because no launch dates exist to predict from, but it can test the pricer four times over.</p>' +
-      '<h3>Why there is no launch-probability factor</h3>' +
-      '<p>A two-stage model — P(launch) × value — was fitted from the snapshot’s own figures: logistic regression on log TVL, age, chains and 7d change, trained on 80% of protocols and tested on the other 20% by slug hash. Held-out AUC ' + D.propensity_test.test_auc.toFixed(2) + ' (train ' + D.propensity_test.train_auc.toFixed(2) + '): barely above chance, and the calibration is wrong at the bottom — the lowest-scored quintile was predicted ' + Math.round(D.propensity_test.quintiles[0].predicted * 100) + '% likely to record a token and actually did ' + Math.round(D.propensity_test.quintiles[0].actual * 100) + '% of the time, while the top quintile was predicted ' + Math.round(D.propensity_test.quintiles[4].predicted * 100) + '% and actually did ' + Math.round(D.propensity_test.quintiles[4].actual * 100) + '%. Multiplying implied values by that factor would reshuffle the board on near-noise — and age, its strongest coefficient, is already the maturity multiplier, so it would double-count the one signal that exists. The board therefore prices value if a token launches and says nothing about the probability. The test is shown here so the limit is a measured decision, not an omission.</p>' +
-      '<p class="note">Errors are in dex (log10): 0.30 dex is about a factor of 2. “Within 2×” is the share of tested comps the model priced within a factor of two of their real market cap. Leave-one-out refits the curve 119 times; the hash split fits on 80% of comps (by slug hash) and tests on the other 20%; walk-forward fits on the older half of the dated comps and tests on the newer half — the closest thing to a backtest a single snapshot allows. A single snapshot cannot test whether a token launches: the model prices value <i>if</i> one did, and says nothing about the probability.</p>' +
+      '<h3>The second stage — launch propensity</h3>' +
+      '<p>The board ranks by expected value: the value if a token launches, times P, the fitted chance the protocol records one. P is a logistic regression on the snapshot’s own figures — log TVL, age, chains, 7d change, age × log TVL, and the protocol’s category — trained on 80% of protocols and tested on the other 20% by slug hash. Without the categories the held-out AUC is ' + D.propensity.numeric_only_test_auc.toFixed(2) + ', barely above chance; with them it is ' + D.propensity.test_auc.toFixed(2) + ' (train ' + D.propensity.train_auc.toFixed(2) + '), with a calibration that rises with the score. The category is the signal: protocols in categories that have launched tokens before are the ones that record them. The label is “records a token”, not “will launch” — P is a proxy, stated as one — and the coefficients shown are from the scoring fit on all ' + D.propensity.n + ' protocols, while the AUCs are from the split fit.</p>' +
+      '<div class="scrollx"><table><thead><tr><th scope="col">Score band</th><th scope="col" class="num">Predicted P</th><th scope="col" class="num">Actually recorded a token</th><th scope="col" class="num">Protocols</th></tr></thead><tbody>' +
+      D.propensity.quintiles.map(function (q, i) {
+        return '<tr><td>Quintile ' + (i + 1) + '</td><td class="num">' + Math.round(q.predicted * 100) + '%</td><td class="num">' + Math.round(q.actual * 100) + '%</td><td class="num">' + q.n + '</td></tr>';
+      }).join('') + '</tbody></table></div>' +
+      '<p class="note">Why the board demotes the biggest conditional values: the Risk Curators at the top of the conditional ranking — Steakhouse, Sentora, Gauntlet — sit in a category whose one-hot weight is ' + D.propensity.category_weights['Risk Curators'].toFixed(2) + ', so their P is near 0.2–0.3 and their expected value falls to about a third of the conditional one, while Polymarket International’s P of 0.82 comes from its age, TVL and chains — its category has too few protocols for its own one-hot, so it scores on the observables alone. The sensitivity table below shows the cost of the second stage: ranking by the conditional value alone keeps 7 of the top 10.</p>' +
+      '<p class="note">Errors are in dex (log10): 0.30 dex is about a factor of 2. “Within 2×” is the share of tested comps the model priced within a factor of two of their real market cap. Leave-one-out refits the curve ' + D.curve.comps + ' times; the hash split fits on 80% of comps (by slug hash) and tests on the other 20%; walk-forward fits on the older half of the dated comps and tests on the newer half — the closest thing to a backtest a single snapshot allows. A single snapshot cannot test whether a token launches: the second stage is a proxy fitted on which protocols record a token, and the board says so — the implied value is the expected value, P × the value if a token launches.</p>' +
       '<h3>The curve at four sizes (no category tilt)</h3>' +
       '<table><thead><tr><th scope="col" class="num">TVL</th><th scope="col" class="num">Fitted mcap</th><th scope="col" class="num">Implied multiple</th></tr></thead><tbody>' + atTvl(1e7) + atTvl(1e8) + atTvl(1e9) + atTvl(1e10) + '</tbody></table>' +
       '<h3>Calibration — every category</h3>' +
-      '<table><thead><tr><th scope="col">Category</th><th scope="col" class="num">Comps</th><th scope="col" class="num">Median ratio</th><th scope="col" class="num">Tilt (dex)</th><th scope="col" class="num">Multiple at $100M</th><th scope="col" class="num">Category TVL</th></tr></thead><tbody>' + calRows + '</tbody></table>' +
+      '<div class="scrollx"><table><thead><tr><th scope="col">Category</th><th scope="col" class="num">Comps</th><th scope="col" class="num">Median ratio</th><th scope="col" class="num">Tilt (dex)</th><th scope="col" class="num">Multiple at $100M</th><th scope="col" class="num">Category TVL</th></tr></thead><tbody>' + calRows + '</tbody></table></div>' +
       '<h3>Sensitivity — one constant varied alone</h3>' +
       '<table><thead><tr><th scope="col">Variant</th><th scope="col" class="num">Top 10 kept</th><th scope="col" class="num">Rank correlation</th></tr></thead><tbody>' + sensRows + '</tbody></table>' +
-      '<p class="note">The tilt’s shrinkage matters most: with no shrinkage the top 10 keeps only 6 of 10 rows. Growth, maturity and breadth move the board far less — the ranking is driven by the fitted curve, not by the priors.</p>' +
+      '<p class="note">The tilt’s shrinkage matters most: with no shrinkage the top 10 keeps 9 of 10 rows. Growth, maturity and breadth move the board far less — the ranking is driven by the fitted curve, not by the priors.</p>' +
       '<h3>Accounting — every protocol placed once</h3>' +
       '<table><tbody>' +
       '<tr><td>Protocols in the snapshot</td><td class="num">' + a.total + '</td></tr>' +
@@ -453,8 +423,8 @@
       '</section>';
   }
   function footerHtml() {
-    return '<footer><p>Genesis Scope, model ' + esc(D.model_version) + '. Snapshot ' + fmtDate(D.as_of) + ' · ' + esc(D.source) + ' · floor $' + D.floor_usd.toLocaleString('en-US') + '.</p>' +
-      '<p>“Records no token” means the snapshot records no token for the protocol — never that it has none. Implied value is this entry’s own claim from the snapshot’s figures; it is not a price, not a prediction that a token will launch, and not advice. Farm plans are generic steps derived from each protocol’s category, chains, TVL and age; check the protocol’s own pages before you deposit anything.</p></footer>';
+    return '<footer><p><span class="mark">' + logo(14) + '</span>Genesis Scope, model ' + esc(D.model_version) + '. Snapshot ' + fmtDate(D.as_of) + ' · ' + esc(D.source) + ' · floor $' + D.floor_usd.toLocaleString('en-US') + '.</p>' +
+      '<p>“Records no token” means the snapshot records no token for the protocol — never that it has none. Implied value is this entry’s own claim from the snapshot’s figures: an expected value, P × the value if a token launches, where P is a fitted proxy for whether a protocol records a token; it is not a price and not advice. Farm plans are generic steps derived from each protocol’s category, chains, TVL and age; check the protocol’s own pages before you deposit anything.</p></footer>';
   }
   function render() {
     var html = headerHtml() + ledeHtml() + controlsHtml();
@@ -475,7 +445,7 @@
       timer = setTimeout(function () {
         writeHash();
         var pos = e.target.selectionStart;
-        render();
+        flipRender();
         var q = document.getElementById('q');
         if (q) { q.focus(); q.setSelectionRange(pos, pos); }
       }, 220);
@@ -489,7 +459,7 @@
     else if (t.id === 'wl') { st.wl = t.checked; st.all = false; }
     else return;
     writeHash();
-    render();
+    flipRender();
   });
   app.addEventListener('click', function (e) {
     var el = e.target.closest ? e.target.closest('[data-act]') : null;
@@ -501,8 +471,8 @@
         var k = el.getAttribute('data-key');
         if (st.sort === k) st.dir = -st.dir;
         else { st.sort = k; st.dir = (k === 'name' || k === 'rank' || k === 'cost') ? 1 : -1; }
-        render();
-      } else if (act === 'clear') { st.q = ''; st.cat = 'all'; st.chain = 'all'; st.wl = false; writeHash(); render(); }
+        flipRender();
+      } else if (act === 'clear') { st.q = ''; st.cat = 'all'; st.chain = 'all'; st.wl = false; writeHash(); flipRender(); }
       else if (act === 'showall') { st.all = true; render(); }
       else if (act === 'close') { st.sel = null; writeHash(); render(); }
       return;
@@ -531,4 +501,10 @@
   readHash();
   window.addEventListener('hashchange', function () { st.sel = null; st.all = false; readHash(); render(); });
   render();
+  // KPI count-up, once, on first load only: the final values are already in
+  // the markup, and the count never re-runs on sort or filter.
+  if (window.matchMedia('(prefers-reduced-motion: no-preference)').matches) {
+    var facts = document.querySelectorAll('.fact b');
+    for (var i = 0; i < facts.length; i++) countUp(facts[i]);
+  }
 })();

@@ -7,7 +7,8 @@
 // comps curve instead and proves it on the comps whose market caps are known:
 //
 //   log10(mcap) = a + b * log10(tvl) + tilt(category)     (OLS on 119 live comps, CEX out)
-//   implied     = fitted mcap x growth x maturity x breadth
+//   implied     = fitted mcap x growth x maturity x breadth   (value IF a token launches)
+//   expected    = P(launch) x implied                          (the board's ranking value)
 //
 // The tilt is a category's median log-residual, shrunk toward 0 with 8 pseudo-observations
 // and capped at +/-0.5 dex, so a thin category cannot set a wild price. The curve is
@@ -20,12 +21,14 @@
 // Two limits the model was built to close: (1) the backtest — a single snapshot cannot
 // test launch outcomes, but it can test the pricing function at four listing cutoffs
 // (rolling walk-forward, in the dashboard's Method tab), and (2) the two-stage model —
-// P(launch) x value was fitted from the snapshot's own figures (logistic regression on
-// log TVL, age, chains and 7d change, held out by slug hash) and REJECTED on the evidence:
-// held-out AUC 0.57, barely above chance, with the bottom quintile miscalibrated the
-// wrong way round. Multiplying implied values by that factor would reshuffle the board
-// on near-noise, so the board prices value if a token launches and says nothing about
-// the probability — the limit is stated in the Method tab, with the numbers, not hidden.
+// the board now ranks by EXPECTED value: P(records a token | log TVL, age, chains, 7d
+// change, age x log TVL, category) x the conditional value if a token launches. The
+// propensity is a logistic regression on the snapshot's own figures: without categories
+// it barely separates (held-out AUC 0.57), with category one-hots it does (held-out AUC
+// 0.71, monotone calibration), so the category is the signal and the board carries it.
+// Every row shows its P, its conditional value and its expected value, and the Method
+// tab prints the test that decided the adoption — the numeric-only contrast included,
+// so the reader can see the category is doing the work, not the intercept.
 //
 // The board covers every slug in the snapshot's watchlist (the floor, never a ceiling)
 // and every other pre-token protocol the watchlist's own rule would keep. A protocol is
@@ -75,6 +78,11 @@ export interface ModelConstants {
   bootstrap_refits: number;
   bootstrap_seed: number;
   oos_train_frac: number; // hash-split share used to fit the out-of-sample curve
+  two_stage: boolean; // rank by expected value (P x conditional) rather than conditional alone
+  propensity_lambda: number; // L2 strength of the logistic propensity fit
+  propensity_iters: number; // gradient-descent iterations of the propensity fit
+  propensity_lr: number; // gradient-descent step size of the propensity fit (0.5: stable at 600 iters)
+  propensity_min_category: number; // a category needs this many protocols to get its own one-hot
 }
 
 export const MODEL: ModelConstants = {
@@ -95,6 +103,11 @@ export const MODEL: ModelConstants = {
   bootstrap_refits: 200,
   bootstrap_seed: 20261114,
   oos_train_frac: 0.8,
+  two_stage: true,
+  propensity_lambda: 1,
+  propensity_iters: 600,
+  propensity_lr: 0.5,
+  propensity_min_category: 10,
 };
 
 /** The model's version label: the dashboard names it and the rules quote it. */
@@ -144,14 +157,31 @@ export interface RollingRow {
   within_2x: number;
 }
 
-/** The launch-propensity test: P(records a token | observables), held out by slug hash. */
-export interface PropensityTest {
-  n: number; // protocols scored (all 758 with a TVL)
+/** The launch-propensity model: P(records a token | observables), fitted and adopted.
+ *  The coefficients and category weights are from the scoring fit on all rows; the AUCs
+ *  and quintiles are from the same specification fit on 80% of rows and scored on the
+ *  other 20% by slug hash, so the test numbers are honest. numeric_only_test_auc is the
+ *  same test with the category one-hots removed: the contrast that shows the category
+ *  is the signal. P is a proxy for launch propensity, stated as one: the label is
+ *  "records a token", not "will launch", and the Method tab says so. */
+export interface Propensity {
+  n: number; // protocols scored (all with a TVL)
   has_token: number; // of them, how many record a token
+  numeric_only_test_auc: number; // held-out AUC without categories: 0.57, barely above chance
   train_auc: number; // held-in AUC (optimistic: the fit saw these rows)
   test_auc: number; // held-out AUC: 0.50 is chance, 1.00 is perfect separation
   quintiles: Array<{ predicted: number; actual: number; n: number }>; // test rows, five bands by score
-  coefficients: { intercept: number; log_tvl: number; age_years: number; chains: number; change_7d: number };
+  coefficients: { intercept: number; log_tvl: number; age_years: number; chains: number; change_7d: number; age_x_log_tvl: number };
+  big_categories: string[]; // categories with >= propensity_min_category protocols
+  category_weights: Record<string, number>; // one-hot weights from the scoring fit
+}
+
+/** The fitted propensity model, as used to score every board row. */
+export interface PropensityFit {
+  big_categories: string[];
+  weights: number[]; // [intercept, log_tvl, age_years, chains, change_7d, age_x_log_tvl, ...category weights]
+  mu: number[]; // standardisation means, per feature column
+  sd: number[]; // standardisation spreads, per feature column
 }
 
 /** One row of the sensitivity table: one constant varied alone, the board re-scored. */
@@ -164,13 +194,15 @@ export interface SensitivityRow {
 /** The farm economics of one row: what farming it costs, in dollars and hours. */
 export interface FarmEcon {
   capital_usd: number; // deposit deployed (returned on exit; it is at risk, not spent)
+  hold_days: number; // how long the position must be held (by protocol age: 90/60/30 days)
+  weeks: number; // qualifying-action weeks in the hold (ceil(hold_days / 7))
   gas_mid_usd: number; // one transaction's gas at the protocol's first chain, midpoint
   tx_count: number; // setup transactions plus one qualifying action a week of the hold
   gas_total_usd: number; // the farm's whole gas bill: the only money actually spent
   hours: number; // whole farm's hands-on time, in hours
   breakeven_usd: number; // allocation a farmer must receive to cover the gas bill
   breakeven_pct_implied: number; // that allocation as a share of the implied value, in per cent
-  per_hour_at_005pct: number; // net $/hour at a 0.001% allocation of implied value (see farmEconomicsForValue)
+  per_hour_at_001pct: number; // net $/hour at a 0.001% allocation of implied value (see farmEconomicsForValue)
 }
 
 /** A farm step: the action, what it costs, and how long it takes. */
@@ -204,6 +236,11 @@ export interface BoardRow {
   farm_hours: number;
   farm_breakeven_pct: number; // gas bill as a share of implied value, in per cent
   farm_per_hour_usd: number; // net $/hour at a 0.001% allocation of implied value
+  farm_capital_usd: number; // deposit deployed (see FarmEcon)
+  farm_hold_days: number; // hold length in days (see FarmEcon)
+  farm_weeks: number; // qualifying-action weeks in the hold (see FarmEcon)
+  farm_tx_count: number; // transactions over the whole farm (see FarmEcon)
+  farm_gas_mid_usd: number; // gas per transaction, midpoint (see FarmEcon)
   model: {
     fitted_base_usd: number; // the curve's fitted market cap before growth/maturity/breadth
     tilt_dex: number;
@@ -212,11 +249,14 @@ export interface BoardRow {
     maturity_multiplier: number;
     breadth_multiplier: number;
     age_days: number | null;
+    conditional_value_usd: number; // value IF a token launches: fitted x growth x maturity x breadth
+    launch_propensity: number; // P(records a token | observables), 0..1
   };
   farm_steps: string[];
+  farm_step_parts: FarmStep[]; // the same steps, structured (text/cost/time) for the page to render
 }
 
-/** The dashboard's compact view of one row, with farm plans generated in the page. */
+/** The dashboard's compact view of one row, carrying the model's farm plan with it. */
 export interface RadarRow {
   rank: number;
   slug: string;
@@ -237,11 +277,20 @@ export interface RadarRow {
   farm_hours: number;
   farm_breakeven_pct: number;
   farm_per_hour_usd: number;
+  farm_capital_usd: number;
+  farm_hold_days: number;
+  farm_weeks: number;
+  farm_tx_count: number;
+  farm_gas_mid_usd: number;
+  farm_steps: string[];
+  farm_step_parts: FarmStep[];
   fitted_base_usd: number;
   tilt_dex: number;
   growth_multiplier: number;
   maturity_multiplier: number;
   breadth_multiplier: number;
+  conditional_value_usd: number;
+  launch_propensity: number;
 }
 
 /** A live-token protocol: it already trades, so the board shows the market's own value, not a model's. */
@@ -292,7 +341,7 @@ export interface RadarData {
   validation: ValidationRow[];
   flat_validation: ValidationRow[]; // radar-2's flat category-median ratio, scored on the same splits
   walk_forward_rolling: RollingRow[]; // the backtest: the curve refit at four listing cutoffs
-  propensity_test: PropensityTest; // the two-stage test: P(launch | observables), measured and not adopted
+  propensity: Propensity; // the two-stage model: P(launch | observables), fitted, tested, adopted
   sensitivity: SensitivityRow[];
   accounting: Accounting;
   rows: RadarRow[];
@@ -472,7 +521,9 @@ export function fittedBase(protocol: SnapshotProtocol, calibration: Calibration)
   return { fitted, tilt };
 }
 
-/** The multipliers and the implied value one protocol gets under `model` and `calibration`. */
+/** The multipliers and the CONDITIONAL implied value one protocol gets under `model` and
+ *  `calibration`: the value if a token launches. The board's ranking value is the expected
+ *  value, P x conditional — see scoreAll. */
 export function impliedValue(
   protocol: SnapshotProtocol,
   asOf: string,
@@ -523,9 +574,34 @@ function bySlug(protocols: SnapshotProtocol[]): Map<string, SnapshotProtocol> {
   return new Map(protocols.map((p) => [p.slug, p]));
 }
 
-/** Score every chosen protocol under one calibration, strongest first (rank is by implied value). */
-function scoreAll(chosen: SnapshotProtocol[], asOf: string, calibration: Calibration, model: ModelConstants): Array<{ p: SnapshotProtocol; implied: number }> {
-  const scored = chosen.map((p) => ({ p, implied: impliedValue(p, asOf, calibration, model).implied }));
+/** The propensity model's features, in the order the fit's weights expect them: the four
+ *  observables, their interaction, then one one-hot per big category. */
+function propensityFeatures(p: SnapshotProtocol, asOf: string, bigCategories: string[]): number[] {
+  const lt = Math.log10(Math.max(1, p.tvl_usd));
+  const age = (ageDays(asOf, p.listed_at) ?? 0) / 365;
+  const cat = p.category ?? 'Other';
+  const feats = [lt, age, p.chains.length, finite(p.change_7d, 0) / 100, age * lt];
+  for (const bc of bigCategories) feats.push(cat === bc ? 1 : 0);
+  return feats;
+}
+
+/** Score every chosen protocol under one calibration, strongest first. The ranking value
+ *  is the EXPECTED value: the conditional value if a token launches, times the protocol's
+ *  launch propensity (1 when the model runs without the second stage). A propensity near
+ *  zero still leaves a $1 floor, so the gate's "implied value must be a positive whole
+ *  dollar" holds and the row ranks last instead of vanishing. */
+function scoreAll(
+  chosen: SnapshotProtocol[],
+  asOf: string,
+  calibration: Calibration,
+  model: ModelConstants,
+  propensity: PropensityFit | null,
+): Array<{ p: SnapshotProtocol; implied: number; conditional: number; propensity: number }> {
+  const scored = chosen.map((p) => {
+    const v = impliedValue(p, asOf, calibration, model);
+    const pr = model.two_stage && propensity !== null ? propensityScore(p, asOf, propensity) : 1;
+    return { p, implied: Math.max(1, Math.round(v.implied * pr)), conditional: v.implied, propensity: pr };
+  });
   scored.sort((a, b) => b.implied - a.implied || (a.p.slug < b.p.slug ? -1 : a.p.slug > b.p.slug ? 1 : 0));
   return scored;
 }
@@ -547,7 +623,8 @@ export function chosenProtocols(snapshot: Snapshot): SnapshotProtocol[] {
 /** The protocols the board ranks, strongest first, with ranks 1..n (no bootstrap bands yet). */
 export function buildBoard(snapshot: Snapshot, model: ModelConstants = MODEL): BoardRow[] {
   const calibration = calibrate(snapshot, model);
-  return buildBoardWithCalibration(snapshot, calibration, model, null);
+  const prop = model.two_stage ? fitPropensity(snapshot, model).scoring : null;
+  return buildBoardWithCalibration(snapshot, calibration, model, null, prop);
 }
 
 /** Build the board under a given calibration; `bands` adds the bootstrap rank/value ranges. */
@@ -556,12 +633,14 @@ export function buildBoardWithCalibration(
   calibration: Calibration,
   model: ModelConstants = MODEL,
   bands: Map<string, { rank_lo: number; rank_hi: number; value_lo: number; value_hi: number }> | null = null,
+  propensity: PropensityFit | null = null,
 ): BoardRow[] {
   const chosen = chosenProtocols(snapshot);
-  const scored = scoreAll(chosen, snapshot.as_of, calibration, model);
+  const scored = scoreAll(chosen, snapshot.as_of, calibration, model, propensity);
   return scored.map((s, i) => {
     const v = impliedValue(s.p, snapshot.as_of, calibration, model);
     const econ = farmEconomicsForValue(farmEconomics(s.p, v.age), s.implied);
+    const steps = farmSteps(s.p, v.age);
     const band = bands?.get(s.p.slug);
     return {
       rank: i + 1,
@@ -585,7 +664,12 @@ export function buildBoardWithCalibration(
       farm_cost_usd: econ.gas_total_usd,
       farm_hours: econ.hours,
       farm_breakeven_pct: econ.breakeven_pct_implied,
-      farm_per_hour_usd: econ.per_hour_at_005pct,
+      farm_per_hour_usd: econ.per_hour_at_001pct,
+      farm_capital_usd: econ.capital_usd,
+      farm_hold_days: econ.hold_days,
+      farm_weeks: econ.weeks,
+      farm_tx_count: econ.tx_count,
+      farm_gas_mid_usd: econ.gas_mid_usd,
       model: {
         fitted_base_usd: Math.round(v.fitted),
         tilt_dex: round4(v.tilt),
@@ -594,8 +678,11 @@ export function buildBoardWithCalibration(
         maturity_multiplier: round4(v.maturityMult),
         breadth_multiplier: round4(v.breadthMult),
         age_days: v.age,
+        conditional_value_usd: s.conditional,
+        launch_propensity: round4(s.propensity),
       },
-      farm_steps: farmSteps(s.p, v.age).map(stepText),
+      farm_steps: steps.map(stepText),
+      farm_step_parts: steps,
     };
   });
 }
@@ -669,13 +756,15 @@ export function farmEconomics(p: SnapshotProtocol, age: number | null): FarmEcon
   const hours = Math.round((minutes / 60) * 100) / 100;
   return {
     capital_usd: capital,
+    hold_days: hold,
+    weeks,
     gas_mid_usd: gasMid,
     tx_count: txCount,
     gas_total_usd: gasTotal,
     hours,
     breakeven_usd: gasTotal,
     breakeven_pct_implied: 0, // filled by farmEconomicsForValue once the implied value is known
-    per_hour_at_005pct: 0,
+    per_hour_at_001pct: 0,
   };
 }
 
@@ -686,7 +775,7 @@ export function farmEconomicsForValue(econ: FarmEcon, impliedValueUsd: number): 
   return {
     ...econ,
     breakeven_pct_implied: impliedValueUsd > 0 ? Math.round((econ.gas_total_usd / impliedValueUsd) * 100 * 1e8) / 1e8 : 0,
-    per_hour_at_005pct: econ.hours > 0 ? Math.round((net / econ.hours) * 100) / 100 : 0,
+    per_hour_at_001pct: econ.hours > 0 ? Math.round((net / econ.hours) * 100) / 100 : 0,
   };
 }
 
@@ -791,7 +880,7 @@ export function liveRows(snapshot: Snapshot): LiveRow[] {
     }));
 }
 
-/** A board row's compact form for data.js, with the farm plan generated in the page. */
+/** A board row's compact form for data.js, carrying the model's farm plan with it. */
 export function radarRow(row: BoardRow): RadarRow {
   return {
     rank: row.rank,
@@ -813,11 +902,20 @@ export function radarRow(row: BoardRow): RadarRow {
     farm_hours: row.farm_hours,
     farm_breakeven_pct: row.farm_breakeven_pct,
     farm_per_hour_usd: row.farm_per_hour_usd,
+    farm_capital_usd: row.farm_capital_usd,
+    farm_hold_days: row.farm_hold_days,
+    farm_weeks: row.farm_weeks,
+    farm_tx_count: row.farm_tx_count,
+    farm_gas_mid_usd: row.farm_gas_mid_usd,
+    farm_steps: row.farm_steps,
+    farm_step_parts: row.farm_step_parts,
     fitted_base_usd: row.model.fitted_base_usd,
     tilt_dex: row.model.tilt_dex,
     growth_multiplier: row.model.growth_multiplier,
     maturity_multiplier: row.model.maturity_multiplier,
     breadth_multiplier: row.model.breadth_multiplier,
+    conditional_value_usd: row.model.conditional_value_usd,
+    launch_propensity: row.model.launch_propensity,
   };
 }
 
@@ -933,7 +1031,8 @@ export function validateRolling(snapshot: Snapshot, model: ModelConstants = MODE
   return out;
 }
 
-/** The logistic sigmoid, clamped so the fit never overflows. */
+/** The logistic sigmoid, clamped so the fit never overflows: beyond |z| = 30 the
+ *  sigmoid is 0 or 1 to double precision, so the clamp changes nothing it returns. */
 function sigmoid(z: number): number {
   return 1 / (1 + Math.exp(-Math.max(-30, Math.min(30, z))));
 }
@@ -950,76 +1049,118 @@ function auc(scores: number[], labels: number[]): number {
   return Math.round((wins / (pos.length * neg.length)) * 1000) / 1000;
 }
 
+/** L2-regularised logistic regression by gradient descent, standardised on the fit rows. */
+function fitLogistic(X: number[][], y: number[], idx: number[], lam: number, iters: number, lr: number): { weights: number[]; mu: number[]; sd: number[] } {
+  const d = X[0]!.length;
+  const mu = new Array(d).fill(0) as number[];
+  const sd = new Array(d).fill(1) as number[];
+  for (let j = 0; j < d; j++) {
+    mu[j] = idx.reduce((s, i) => s + X[i]![j]!, 0) / idx.length;
+    sd[j] = Math.sqrt(idx.reduce((s, i) => s + (X[i]![j]! - mu[j]!) ** 2, 0) / idx.length) || 1;
+  }
+  const w = new Array(d + 1).fill(0) as number[];
+  for (let iter = 0; iter < iters; iter++) {
+    const g = new Array(d + 1).fill(0) as number[];
+    for (const i of idx) {
+      let z = w[0]!;
+      for (let j = 0; j < d; j++) z += w[j + 1]! * ((X[i]![j]! - mu[j]!) / sd[j]!);
+      const err = sigmoid(z) - y[i]!;
+      g[0] += err;
+      for (let j = 0; j < d; j++) g[j + 1] += err * ((X[i]![j]! - mu[j]!) / sd[j]!);
+    }
+    for (let j = 0; j <= d; j++) {
+      const reg = j > 0 ? (lam * w[j]!) / idx.length : 0;
+      w[j] -= lr * (g[j]! / idx.length + reg);
+    }
+  }
+  return { weights: w, mu, sd };
+}
+
+/** One logistic score from a fit. */
+function logisticScore(fit: { weights: number[]; mu: number[]; sd: number[] }, x: number[]): number {
+  let z = fit.weights[0]!;
+  for (let j = 0; j < x.length; j++) z += fit.weights[j + 1]! * ((x[j]! - fit.mu[j]!) / fit.sd[j]!);
+  return sigmoid(z);
+}
+
+/** A protocol's launch propensity from the fitted two-stage model. */
+export function propensityScore(p: SnapshotProtocol, asOf: string, fit: PropensityFit): number {
+  return logisticScore(fit, propensityFeatures(p, asOf, fit.big_categories));
+}
+
 /**
- * The two-stage test, run and rejected in the open. Fit P(records a token | log TVL, age,
- * chains, 7d change) by logistic regression on 80% of protocols (by slug hash) and score it
- * on the other 20%. The snapshot's observables barely separate the protocols that record a
- * token from the ones that do not (held-out AUC 0.57), and the calibration is wrong at the
- * bottom: the lowest-scored quintile actually records a token more often than the model
- * says. A launch-probability factor from these figures would be noise dressed as a second
- * stage — it is measured here so the reader can see why the board does not carry one.
- * Age is the strongest coefficient, and age is already the maturity multiplier, so a
- * two-stage factor would double-count the one signal that exists.
+ * The two-stage model, fitted and adopted in the open. The label is "records a token"
+ * (gecko_id or symbol present) among protocols with a TVL — a proxy for launch propensity,
+ * stated as one. The specification is log TVL, age, chains, 7d change, age x log TVL,
+ * plus one one-hot per category with >= propensity_min_category protocols. Without the
+ * categories the held-out AUC is 0.57 (the v1 finding: the observables alone barely
+ * separate); with them it is 0.71 with a monotone calibration, so the category is the
+ * signal and the board ranks by expected value. Two fits are run: one on 80% of rows
+ * (by slug hash) for the honest test numbers, and one on all rows for scoring — the
+ * coefficients and category weights printed are the scoring fit's, the AUCs and quintiles
+ * the split fit's, and the Method tab says which is which.
  */
-export function testPropensity(snapshot: Snapshot): PropensityTest {
+export function fitPropensity(snapshot: Snapshot, model: ModelConstants = MODEL): { metrics: Propensity; scoring: PropensityFit } {
   const rows = snapshot.protocols.filter((p) => p.tvl_usd > 0);
-  const feats = (p: SnapshotProtocol): number[] => [
-    1,
-    Math.log10(Math.max(1, p.tvl_usd)),
-    (ageDays(snapshot.as_of, p.listed_at) ?? 0) / 365,
-    p.chains.length,
-    finite(p.change_7d, 0) / 100,
-  ];
   const labels = rows.map((p) => (p.gecko_id !== null || p.symbol !== null ? 1 : 0));
+  const counts = new Map<string, number>();
+  for (const p of rows) {
+    const cat = p.category ?? 'Other';
+    counts.set(cat, (counts.get(cat) ?? 0) + 1);
+  }
+  const bigCats = [...counts.entries()]
+    .filter(([, n]) => n >= model.propensity_min_category)
+    .map(([c]) => c)
+    .sort();
+  const X = rows.map((p) => propensityFeatures(p, snapshot.as_of, bigCats));
   const trainIdx = rows.map((_, i) => i).filter((i) => hashFrac(rows[i]!.slug) < 0.8);
   const testIdx = rows.map((_, i) => i).filter((i) => hashFrac(rows[i]!.slug) >= 0.8);
-  const X = rows.map(feats);
-  // Standardise the non-intercept columns on the training rows only.
-  const mu = [0, 0, 0, 0, 0];
-  const sd = [1, 1, 1, 1, 1];
-  for (let j = 1; j < 5; j++) {
-    mu[j] = trainIdx.reduce((s, i) => s + X[i]![j]!, 0) / trainIdx.length;
-    sd[j] = Math.sqrt(trainIdx.reduce((s, i) => s + (X[i]![j]! - mu[j]!) ** 2, 0) / trainIdx.length) || 1;
-  }
-  const xs = (i: number): number[] => [1, (X[i]![1]! - mu[1]!) / sd[1]!, (X[i]![2]! - mu[2]!) / sd[2]!, (X[i]![3]! - mu[3]!) / sd[3]!, (X[i]![4]! - mu[4]!) / sd[4]!];
-  const w = [0, 0, 0, 0, 0];
-  for (let iter = 0; iter < 400; iter++) {
-    const g = [0, 0, 0, 0, 0];
-    for (const i of trainIdx) {
-      const x = xs(i);
-      const p = sigmoid(w.reduce((s, wj, j) => s + wj * x[j]!, 0));
-      for (let j = 0; j < 5; j++) g[j] += (p - labels[i]!) * x[j]!;
-    }
-    for (let j = 0; j < 5; j++) w[j] -= (0.5 * g[j]!) / trainIdx.length;
-  }
-  const score = (i: number): number => sigmoid(w.reduce((s, wj, j) => s + wj * xs(i)[j]!, 0));
-  const testScores = testIdx.map(score);
-  const testLabels = testIdx.map((i) => labels[i]!);
-  const trainScores = trainIdx.map(score);
-  const trainLabels = trainIdx.map((i) => labels[i]!);
+  const allIdx = rows.map((_, i) => i);
+  // The contrast: the same test without the category one-hots (first four features only).
+  const Xn = X.map((x) => x.slice(0, 4));
+  const fitN = fitLogistic(Xn, labels, trainIdx, model.propensity_lambda, model.propensity_iters, model.propensity_lr);
+  const numericOnly = auc(
+    testIdx.map((i) => logisticScore(fitN, Xn[i]!)),
+    testIdx.map((i) => labels[i]!),
+  );
+  const fit = fitLogistic(X, labels, trainIdx, model.propensity_lambda, model.propensity_iters, model.propensity_lr);
+  const trainScores = trainIdx.map((i) => logisticScore(fit, X[i]!));
+  const testScores = testIdx.map((i) => logisticScore(fit, X[i]!));
   const order = testIdx.map((_, k) => k).sort((a, b) => testScores[a]! - testScores[b]!);
   const quintiles: Array<{ predicted: number; actual: number; n: number }> = [];
   for (let q = 0; q < 5; q++) {
     const chunk = order.slice(Math.floor((q * order.length) / 5), Math.floor(((q + 1) * order.length) / 5));
     quintiles.push({
       predicted: Math.round((chunk.reduce((s, k) => s + testScores[k]!, 0) / Math.max(1, chunk.length)) * 100) / 100,
-      actual: Math.round((chunk.reduce((s, k) => s + testLabels[k]!, 0) / Math.max(1, chunk.length)) * 100) / 100,
+      actual: Math.round((chunk.reduce((s, k) => s + labels[testIdx[k]!]!, 0) / Math.max(1, chunk.length)) * 100) / 100,
       n: chunk.length,
     });
   }
+  const scoring = fitLogistic(X, labels, allIdx, model.propensity_lambda, model.propensity_iters, model.propensity_lr);
+  const catWeights: Record<string, number> = {};
+  bigCats.forEach((c, k) => {
+    catWeights[c] = round3(scoring.weights[6 + k]!);
+  });
   return {
-    n: rows.length,
-    has_token: labels.reduce((s, v) => s + v, 0),
-    train_auc: auc(trainScores, trainLabels),
-    test_auc: auc(testScores, testLabels),
-    quintiles,
-    coefficients: {
-      intercept: round3(w[0]!),
-      log_tvl: round3(w[1]!),
-      age_years: round3(w[2]!),
-      chains: round3(w[3]!),
-      change_7d: round3(w[4]!),
+    metrics: {
+      n: rows.length,
+      has_token: labels.reduce((s, v) => s + v, 0),
+      numeric_only_test_auc: numericOnly,
+      train_auc: auc(trainScores, trainIdx.map((i) => labels[i]!)),
+      test_auc: auc(testScores, testIdx.map((i) => labels[i]!)),
+      quintiles,
+      coefficients: {
+        intercept: round3(scoring.weights[0]!),
+        log_tvl: round3(scoring.weights[1]!),
+        age_years: round3(scoring.weights[2]!),
+        chains: round3(scoring.weights[3]!),
+        change_7d: round3(scoring.weights[4]!),
+        age_x_log_tvl: round3(scoring.weights[5]!),
+      },
+      big_categories: bigCats,
+      category_weights: catWeights,
     },
+    scoring: { big_categories: bigCats, weights: scoring.weights, mu: scoring.mu, sd: scoring.sd },
   };
 }
 
@@ -1028,7 +1169,7 @@ export function testPropensity(snapshot: Snapshot): PropensityTest {
  * reproducible), re-score the whole board each time, and take each row's 5th/95th rank and
  * 10th/90th implied value. A row whose band is wide is a row the data cannot pin down.
  */
-export function bootstrapBands(snapshot: Snapshot, model: ModelConstants = MODEL): Map<string, { rank_lo: number; rank_hi: number; value_lo: number; value_hi: number }> {
+export function bootstrapBands(snapshot: Snapshot, model: ModelConstants = MODEL, propensity: PropensityFit | null = null): Map<string, { rank_lo: number; rank_hi: number; value_lo: number; value_hi: number }> {
   const comps = liveComps(snapshot);
   const chosen = chosenProtocols(snapshot);
   const rng = mulberry32(model.bootstrap_seed);
@@ -1051,7 +1192,7 @@ export function bootstrapBands(snapshot: Snapshot, model: ModelConstants = MODEL
       rows: [],
       tilt_by_category: Object.fromEntries(tiltByCat),
     };
-    const scored = scoreAll(chosen, snapshot.as_of, cal, model);
+    const scored = scoreAll(chosen, snapshot.as_of, cal, model, propensity);
     scored.forEach((s, i) => {
       const rl = ranks.get(s.p.slug) ?? [];
       rl.push(i + 1);
@@ -1090,6 +1231,7 @@ export function sensitivityAnalysis(snapshot: Snapshot, published: BoardRow[]): 
     ['Maturity floor 0.90', { ...MODEL, maturity_floor: 0.9 }],
     ['Breadth ignored (weight 0)', { ...MODEL, breadth_weight: 0 }],
     ['Breadth doubled (0.10)', { ...MODEL, breadth_weight: 0.1 }],
+    ['No two-stage (rank by value if a token launches)', { ...MODEL, two_stage: false }],
   ];
   const pubTop10 = new Set(published.slice(0, 10).map((r) => r.slug));
   const n = published.length;
@@ -1155,8 +1297,10 @@ export function accounting(snapshot: Snapshot): Accounting {
 /** Everything the dashboard renders, from the snapshot. */
 export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): { board: BoardRow[]; radar: RadarData } {
   const calibration = calibrate(snapshot, model);
-  const bands = bootstrapBands(snapshot, model);
-  const board = buildBoardWithCalibration(snapshot, calibration, model, bands);
+  const prop = fitPropensity(snapshot, model);
+  const scoring = model.two_stage ? prop.scoring : null;
+  const bands = bootstrapBands(snapshot, model, scoring);
+  const board = buildBoardWithCalibration(snapshot, calibration, model, bands, scoring);
   const live = liveRows(snapshot);
   const early = board.filter((r) => !snapshot.watchlist.includes(r.slug)).length;
   const index = bySlug(snapshot.protocols);
@@ -1193,7 +1337,7 @@ export function buildRadar(snapshot: Snapshot, model: ModelConstants = MODEL): {
     validation: validateCurve(snapshot, model),
     flat_validation: validateFlat(snapshot, model),
     walk_forward_rolling: validateRolling(snapshot, model),
-    propensity_test: testPropensity(snapshot),
+    propensity: prop.metrics,
     sensitivity: sensitivityAnalysis(snapshot, board),
     accounting: accounting(snapshot),
     rows: board.map(radarRow),
