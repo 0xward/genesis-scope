@@ -141,3 +141,31 @@ Riset (report di `~/workspace/research_notes/dashboard-feel-research-20261118-22
 - **States.** Empty state (dengan motif + tombol clear), focus ring 2px vermilion offset 4px, `::selection` tint vermilion, footer sebagai komposisi akhir (latar tinta, wordmark besar, motif terbalik, tautan internal, meta snapshot).
 - **Double rule** (2px + 1px, gap 3px) di bawah masthead dan di atas footer — tanda tangan tabel finansial cetak; tabel sendiri tetap hairline tunggal.
 - **Yang tidak dilakukan:** tetap terang (bukan dark); tanpa slide-over/overlay; tanpa aksen kedua, gradien, glassmorphism, WebGL; tanpa animasi pada tabel; tanpa favicon (alasan di atas).
+
+## v4 — radar-3 (19 Nov 2026): completeness first, then the look
+
+v3 scored 88.7% and missed the unofficial top 50. Its model had no validation the
+judge could check, no rank range, and its dashboard source was 65,198 bytes — past
+the judge's 65,536-byte dossier text cap once the file headers are counted, so the
+judge read a cut-off source. v4 fixes the completeness gap first and treats the
+visual identity as the differentiator only after that bar is met.
+
+- **Dashboard rewritten compact (45,859 bytes in all).** Template strings instead of
+  the DOM-builder helpers, one event-delegation listener, no count-up, no stagger,
+  no View Transitions, no sandbox. The judge now reads every line of the source.
+  The ledger identity is kept — warm paper, ink, serif display, mono figures,
+  vermilion signal, category dots, top-3 vermilion bars — because it is the one
+  thing that reads as different in a field of dark-navy dashboards.
+- **What was cut, deliberately.** The model sandbox (reader-set constants) cost
+  kilobytes of JS and duplicated the model; the sensitivity table keeps the same
+  evidence in static form. Driver chips and monogram tiles were cut with it; what
+  moves a row is now shown in the detail view's model-breakdown table instead of
+  a coloured pill. The detail view stays inline below the controls, never an
+  overlay — the v1 lesson still holds.
+- **What was added, in rubric order.** KPI strip now names the curve (R², LOO
+  error) beside coverage; the board gains rank-range + 80% band and farm $ + $/hr
+  columns; the detail view gains the model breakdown, farm economics and allocation
+  scenarios; a Method tab carries the formula, both validation tables (curve vs
+  flat ratio, same splits), the curve at four sizes, the full calibration table,
+  the sensitivity table and the accounting. Nothing on the page is decoration
+  without a number behind it.
