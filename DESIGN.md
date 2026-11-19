@@ -383,3 +383,102 @@ Audit penuh terhadap 5 kriteria juri (RULES.txt) — data + interaksi, bukan kla
   (nama v2/v3 saat itu). Badge README tetap memuat URL token-radar-01 —
   itu syarat gate (bukan yang dilihat juri) dan dibekukan. Repo tidak
   di-rename.
+
+## v4.1 — redesign AURORA (19 Nov 2026, perintah user: premium gelap ungu)
+
+- **Kenapa dirombak:** user menilai permainan warna v4 JELEK dan terasa AI
+  SLOP, layout/UI/UX JELEK SANGAT; dashboard peserta lain juga kelihatan
+  buatan AI (pola sama: latar gelap generik, aksen jenuh, chip warna-warni).
+  Palet v3 DIBUANG, layout didesain ulang dari nol. Arah baru dipilih user
+  dari 3 referensi yang ia kirim (`~/workspace/makefun/v4-design-refs/`):
+  ref-1 dashboard portfolio gelap ungu, ref-2 dashboard personal gelap ungu,
+  ref-3 landing YieldNest (user khusus suka background garis gelombang
+  pink-ungu).
+- **Tiga varian, user memilih yang pertama (AURORA).** Arah utama + 2 turunan
+  dari arah yang sama (bukan 3 arah tak berhubungan): AURORA (utama, paling
+  setia pada referensi), MIDNIGHT (lebih dalam, angka mono), DUO (ungu +
+  biru terlihat, serif). Catatan riset lengkap di `RESEARCH-DESIGN.md` — 3
+  arah + alasan + token + angka kontras + hasil uji alur.
+- **Struktur (dari ref-1/ref-2):** sidebar navigasi kiri (Overview /
+  Watchlist / Farm Plans / Methodology / Live comps), angka hero besar +
+  chart area top-10, strip 4 KPI, tabel ranking + donut alokasi kategori
+  berdampingan, kartu konsisten, spacing lega, tipografi tegas. Alur
+  pembaca: mendarat → paham ranking dalam hitungan detik → masuk detail
+  satu protokol → lihat farm plan → tahu langkah berikutnya.
+- **Sistem warna semantik (satu warna = satu makna, semua permukaan):**
+  HIJAU #34d399 = positif/kuat (persen naik, implied value, gain, bar
+  positif); MERAH lembut #fb7185 = lemah/negatif (7d turun, $/jam negatif,
+  R² 0,143); UNGU #a78bfa = aksen utama/identitas; BIRU #60a5fa = aksen
+  kedua yang kalem (kata aksen hero "launches", propensity P, ujung
+  gelombang — tidak pernah semantik); netral gelap = dasar. Kategori
+  dibedakan teks, bukan warna (dot 6 hue v3 DIHAPUS). Kontras teks
+  dihitung (WCAG), semua body ≥4,5:1.
+- **Latar gelombang SVG (ref-3):** garis kontur tipis 1px, opacity
+  0,06–0,14, gradasi pink→ungu→biru, di belakang konten, satu sistem yang
+  sama di semua view. Generator: `~/workspace/makefun/verify/wave_gen.py`.
+  Dampak byte aurora 2.023.
+- **Yang dibuang dari v4:** identitas ledger (kertas hangat, tinta, serif
+  display, vermilion, double rule, monogram, movers strip, motion
+  FLIP/count-up) — semuanya diganti identitas gelap ungu premium. Model,
+  board, dan data TIDAK berubah — rebuild ini murni presentasi.
+  Bagian-bagian di atas tentang ledger kini catatan sejarah.
+- **Verifikasi lead (19 Nov 2026, build repo):** `main.ts` 2× deterministik
+  byte-identik; gate 7/7 LOLOS; audit data 19/19; flow test 15/15 (0 console
+  error) setelah satu perbaikan perkakas — cek Farm Plans di flow-test.py
+  awalnya hanya menghitung baris (dan melaporkan nilai baris TERAKHIR $16,02
+  sebagai "first row"), diperkuat jadi assert urutan $/jam menurun + baris
+  pertama = maksimum ($213,51 Polymarket). **Dua cacat ditemukan lead (gate
+  tidak menangkapnya) dan diperbaiki sebelum apply:** (1) `index.html`
+  varian menulis `<script src="data.js">` padahal build menaruh data.js
+  satu level di atas folder dashboard — diperbaiki ke `../data.js`, lalu 3
+  screenshot di-render ulang DARI folder out/ hasil build dan md5-identik
+  dengan screenshot pilihan user; (2) skip link aksesibilitas hilang saat
+  gelombang SVG masuk — dikembalikan beserta CSS `.skip` (app.css Aurora
+  awal tidak memilikinya).
+- **Ukuran final (build repo):** sumber dashboard 63.931 byte (app.css
+  11.828 + app.js 49.626 + index.html 2.477, sesudah 2 perbaikan di atas);
+  teks dossier 63.938 byte (cap 65.536, sisa 1.598); dossier total 388.684
+  byte; screenshot kuantisasi 91.793 / 57.967 / 91.471 byte.
+- **Audit independen atas Aurora (19 Nov 2026):** gate 7/7 dari build
+  auditor sendiri, determinisme byte-identik, board 43/43 (termasuk
+  recompute two-stage penuh: test AUC 0,713 cocok), screenshot repo
+  md5-identik dengan render ulang auditor, kontras terhitung ≥4,5:1.
+  Verdict: layak preview sebagai kandidat 10 besar: YA; calon juara 1:
+  TIDAK bisa diklaim dari audit lokal. **Temuan: F-1 MED** — responsif
+  rusak di ≤1100px (768px scrollWidth 840, 360px 832): `.main` masih
+  `max-width:calc(100vw - 232px)` padahal sidebar sudah statis, dan anak
+  `.content-grid` tanpa `min-width:0` sehingga min-content tabel memaksa
+  grid melebar. **F-2 MED** — 8 langkah farm plan tidak terlihat di
+  screenshot detail (heading di y=1594, 694px di bawah fold 900px):
+  langkah konkret kriteria 3 tidak terlihat di satu pun dari 3 screenshot.
+  UX-1..4 LOW (judul hero slogan; detail tanpa CTA ke Farm Plans; bandbar
+  tanpa label; label donut tidak menyebut cakupan whole-board).
+- **Perbaikan lead atas temuan audit (19 Nov 2026):** F-1 —
+  `max-width:none` pada `.main` di media query 1100px +
+  `.content-grid>*,.cols>*{min-width:0}`; terverifikasi 768/360
+  scrollWidth == clientWidth. F-2 — seksi langkah dipindah DI ATAS skenario
+  alokasi, `.steps .cost` jadi satu baris (bukan blok), dan screenshot
+  detail jadi 1440×1100 seperti board/filtered; langkah kini y 696–1030,
+  terlihat penuh di frame (dibaca visual oleh lead: 8 langkah + breakdown
+  11 baris + biaya farm lengkap). UX-2 — tombol "Farm plans" di kepala
+  detail (terverifikasi klik → Farm Plans, baris pertama Polymarket
+  $213,51/jam); UX-3 — `title` dengan nilai band pada bandbar; UX-4 —
+  subjudul donut "whole board, ignores the filter". UX-1 TIDAK diubah
+  dengan sengaja: judul slogan adalah suara merek yang disetujui user, dan
+  peringkat terbaca tanpa scroll (hero + baris #1). Ukuran sesudah
+  perbaikan: sumber 64.341 byte (sisa 1.195); screenshot baru 86.230 /
+  80.872 / 85.616 byte; gate tetap 7/7, determinisme byte-identik, audit
+  data 19/19, flow 15/15. Catatan: laporan audit menyebut "F-3–F-5" di
+  satu baris tanpa definisi — tidak ada di daftar temuan bernomor, tidak
+  ditindaklanjuti sampai ada definisinya.
+- **Audit ulang singkat pasca-perbaikan (19 Nov 2026):** F-1 TERTUTUP
+  (768/768, 360/360, dibaca visual), F-2 TERTUTUP (steps 696–1030,
+  md5-identik dengan render ulang auditor), UX-2/3/4 OK, tidak ada regresi
+  (gate 7/7, determinisme, flow 15/15, audit data 19/19). Verdict layak
+  preview final: YA. **Temuan baru LOW (diterima, bukan blocker):** N-1 —
+  tabel board butuh geser horizontal di 768px (wadah `.scrollx` memang
+  didesain scrollable; juri merender di 1440px, ke-8 kolom muat); N-2 —
+  caption chart terbelah di 360px (kosmetik). Keduanya TIDAK diperbaiki:
+  juri di desktop, headroom byte menipis (sisa 1.195). Auditor ulang juga
+  mengonfirmasi "F-3–F-5" dari laporan sebelumnya memang tidak pernah
+  terdefinisi.

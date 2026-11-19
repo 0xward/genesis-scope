@@ -3,6 +3,14 @@
 // for every protocol, the live-token set, and the method with its validation tables.
 // The page recomputes nothing the model did not already publish: every number on it is
 // in data.js, so the screenshots, the code and the board agree.
+//
+// Layout (redesign v4, "aurora" direction): a left sidebar for board navigation
+// (Overview / Watchlist / Farm Plans / Methodology / Live comps), a hero with the top
+// implied value and a top-10 area chart, a 4-card KPI strip, then the ranking table
+// beside a right rail (category-allocation donut, movers, the Lido note). The detail
+// panel sits above the table, full content width. All colour lives in app.css — this
+// file is palette-agnostic except for the semantic classes pos / neg / weak / prop,
+// which the stylesheet maps to the green / soft-red / blue system.
 (function () {
   'use strict';
   var D = window.RADAR;
@@ -48,11 +56,6 @@
     var p = String(iso).split('-');
     return p.length === 3 ? p[2] + ' ' + MONTHS[parseInt(p[1], 10) - 1] + ' ' + p[0] : String(iso);
   }
-  function catColor(cat) {
-    var s = cat || 'Other', h = 0;
-    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 997;
-    return h % 6;
-  }
   function logo(size) {
     return '<svg viewBox="0 0 32 32" width="' + size + '" height="' + size + '" aria-hidden="true"><path d="M10 26 A16 16 0 0 1 26 10" fill="none" style="stroke:var(--ink)" stroke-width="1.25" opacity="0.4"/><path d="M6 26 A20 20 0 0 1 26 6" fill="none" style="stroke:var(--signal)" stroke-width="2.5"/><line x1="3" y1="26" x2="29" y2="26" style="stroke:var(--ink)" stroke-width="2" stroke-linecap="round"/><circle cx="26" cy="6" r="2.8" style="fill:var(--signal)"/></svg>';
   }
@@ -83,10 +86,10 @@
     }
   }
 
-  // Count-up for the KPI strip, once on load: the final values already sit in
-  // the markup, so a screenshot at any moment shows a real number. The count
-  // runs 360ms, ease-out cubic (the JS twin of --ease-out), gated on
-  // no-preference; it never runs again on sort or filter.
+  // Count-up for the KPI strip and the hero number, once on load: the final
+  // values already sit in the markup, so a screenshot at any moment shows a
+  // real number. The count runs 360ms, ease-out cubic (the JS twin of
+  // --ease-out), gated on no-preference; it never runs again on sort or filter.
   function countUp(el) {
     var text = el.textContent;
     var parts = text.split(/(\d+(?:\.\d+)?)/g);
@@ -164,36 +167,77 @@
     return null;
   }
 
+  function activeNav() {
+    if (st.tab === 'method') return 'method';
+    if (st.tab === 'live') return 'live';
+    if (st.wl) return 'watchlist';
+    if (st.sort === 'perhour') return 'farm';
+    return 'overview';
+  }
+  function navItem(key, label, hint) {
+    var on = activeNav() === key;
+    return '<button type="button" data-act="nav" data-nav="' + key + '" class="nav-item' + (on ? ' active' : '') + '"' + (on ? ' aria-current="page"' : '') + '><span class="nav-label">' + label + '</span>' + (hint ? '<span class="nav-hint">' + hint + '</span>' : '') + '</button>';
+  }
+  function sidebarHtml() {
+    return '<aside class="side"><div class="side-brand"><span>' + logo(30) + '</span><span><span class="brand-name">Genesis Scope</span><span class="brand-tag">Pre-token protocols, ranked</span></span></div>' +
+      '<nav class="side-nav" aria-label="Board">' +
+      navItem('overview', 'Overview', 'Ranked by implied value') +
+      navItem('watchlist', 'Watchlist', D.watchlist_size + ' protocols') +
+      navItem('farm', 'Farm Plans', 'Sorted by $/hour') +
+      navItem('method', 'Methodology', 'Model &amp; validation') +
+      navItem('live', 'Live comps', D.live.length + ' priced protocols') +
+      '</nav>' +
+      '<div class="side-foot"><div class="rec"><span>File</span> Nº 03 · ' + esc(D.model_version) + '</div><div class="rec"><span>Snapshot</span> ' + fmtDate(D.as_of) + '</div><div class="rec"><span>Model</span> fitted comps curve, validated</div></div></aside>';
+  }
+
+  function heroChart() {
+    var top = D.rows.slice(0, 10);
+    var W = 460, H = 216, L = 46, R = 12, T = 16, B = 26;
+    var max = top[0].implied_value_usd * 1.08;
+    var X = function (i) { return L + i * (W - L - R) / 9; };
+    var Y = function (v) { return T + (1 - v / max) * (H - T - B); };
+    var grid = '';
+    [0, 1e7, 2e7, 3e7, 4e7].forEach(function (v) {
+      grid += '<line class="hgrid" x1="' + L + '" y1="' + Y(v).toFixed(1) + '" x2="' + (W - R) + '" y2="' + Y(v).toFixed(1) + '"/><text class="htick" x="' + (L - 6) + '" y="' + (Y(v) + 4).toFixed(1) + '" text-anchor="end">' + fmtUsd(v) + '</text>';
+    });
+    var pts = top.map(function (r, i) { return [X(i), Y(r.implied_value_usd)]; });
+    var line = 'M' + pts.map(function (p) { return p[0].toFixed(1) + ',' + p[1].toFixed(1); }).join(' L');
+    var area = line + ' L' + pts[9][0].toFixed(1) + ',' + Y(0).toFixed(1) + ' L' + pts[0][0].toFixed(1) + ',' + Y(0).toFixed(1) + ' Z';
+    var dots = pts.map(function (p, i) {
+      return '<circle class="hdot" cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="3.5"><title>' + esc(top[i].name) + ' — ' + fmtUsdFull(top[i].implied_value_usd) + '</title></circle>';
+    }).join('');
+    var xlab = top.map(function (r, i) {
+      return '<text class="htick" x="' + X(i).toFixed(1) + '" y="' + (H - 8) + '" text-anchor="middle">#' + (i + 1) + '</text>';
+    }).join('');
+    var lab = '<text class="hlab" x="' + (pts[0][0] + 8).toFixed(1) + '" y="' + (pts[0][1] - 8).toFixed(1) + '">' + fmtUsd(top[0].implied_value_usd) + '</text>';
+    return '<svg class="hero-chart-svg" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Top 10 protocols by implied value, linear scale">' +
+      '<defs><linearGradient id="heroGrad" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--accent);stop-opacity:.30"/><stop offset="1" style="stop-color:var(--accent);stop-opacity:0"/></linearGradient></defs>' +
+      grid + '<path class="harea" d="' + area + '" fill="url(#heroGrad)"/>' +
+      '<path class="hline" d="' + line + '" fill="none"/>' + dots + xlab + lab + '</svg>' +
+      '<p class="chart-cap">Top 10 by implied value · linear scale · #' + top[0].rank + ' ' + esc(top[0].name) + ' leads; #10 is ' + fmtUsd(top[9].implied_value_usd) + '.</p>';
+  }
+  function heroHtml() {
+    var top = D.rows[0];
+    var a = D.accounting;
+    return '<section class="hero"><div class="hero-copy">' +
+      '<p class="eyebrow"><span class="mark">' + logo(13) + '</span>01 — The board</p>' +
+      '<h1>The <span class="acc-word">launches</span> before the launch.</h1>' +
+      '<p class="dek">The watchlist names <b>' + D.watchlist_size + '</b> protocols to watch. The early radar adds <b>' + D.early_size + '</b> more pre-token protocols the watchlist’s own rule would keep, at any TVL — no wrapped, staked or bridged product, no versioned pool, no exchange product. Every implied value below is this entry’s own claim from the snapshot’s figures: an expected value — the value if a token launches, times the fitted chance one is recorded — a model, not a promise.</p></div>' +
+      '<aside class="hero-chart"><div class="chart-head"><div><span class="chart-label">Top implied value</span><b class="hero-num pos">' + fmtUsd(top ? top.implied_value_usd : null) + '</b></div>' +
+      '<span class="chart-sub">' + esc(top ? top.name : '') + ' · <span class="prop">P ' + Math.round((top ? top.launch_propensity : 0) * 100) + '%</span> · TVL ' + fmtUsd(top ? top.tvl_usd : null) + '</span></div>' +
+      heroChart() + '</aside></section>' +
+      '<div class="facts">' +
+      '<div class="fact"><b>' + a.total + '</b><span>Total protocols in the snapshot</span></div>' +
+      '<div class="fact"><b class="pos">' + D.watchlist_size + ' / ' + D.watchlist_size + '</b><span>Watchlist covered</span></div>' +
+      '<div class="fact"><b class="pos">' + fmtUsd(top ? top.implied_value_usd : null) + '</b><span>Top implied value</span></div>' +
+      '<div class="fact"><b class="pos">' + D.board_size + '</b><span>Farm plans — one per row</span></div>' +
+      '</div>' +
+      '<p class="note acct">Accounting: ' + a.total + ' protocols in the snapshot — ' + a.live_with_mcap + ' with a market cap set aside, ' + a.token_recorded_no_mcap + ' record a token but no market cap, ' + a.no_token_record + ' record no token. Of those ' + a.no_token_record + ', ' + a.excluded_category + ' fall in an excluded category, ' + a.excluded_versioned + ' are versioned pools and ' + a.excluded_wrapped_word + ' are wrapped or staked products — leaving ' + a.rankable + ' ranked rows.</p>';
+  }
+
   function th(key, label, cls) {
     var arrow = st.sort === key ? (st.dir > 0 ? ' ▴' : ' ▾') : '';
     return '<th scope="col"' + (cls ? ' class="' + cls + '"' : '') + '><button type="button" data-act="sort" data-key="' + key + '" class="sortbtn">' + label + arrow + '</button></th>';
-  }
-  function headerHtml() {
-    return '<header class="top"><div class="brand"><span>' + logo(28) + '</span><span class="brand-name">Genesis Scope</span><span class="brand-tag">Pre-token protocols, ranked</span></div>' +
-      '<div class="top-meta"><div class="rec"><span>File</span> Nº 03 · ' + esc(D.model_version) + '</div><div class="rec"><span>Snapshot</span> ' + fmtDate(D.as_of) + ' · DefiLlama protocol index</div><div class="rec"><span>Model</span> fitted comps curve, validated</div></div></header>';
-  }
-  function ledeHtml() {
-    var top = D.rows[0];
-    var a = D.accounting;
-    var top5 = D.rows.slice(0, 5), max = top5[0].implied_value_usd;
-    var bars = top5.map(function (r) {
-      return '<div class="mbi"><span>' + esc(r.name) + '</span><div class="mbr"><span class="track"><i style="width:' + Math.max(4, Math.round(100 * r.implied_value_usd / max)) + '%"></i></span><b>' + fmtUsd(r.implied_value_usd) + '</b></div></div>';
-    }).join('');
-    return '<section class="lede"><p class="eyebrow"><span class="mark">' + logo(13) + '</span>01 — The board</p><div class="lede-grid"><div>' +
-      '<h1>The launches before the launch.</h1>' +
-      '<p class="dek">The watchlist names <b>' + D.watchlist_size + '</b> protocols to watch. The early radar adds <b>' + D.early_size + '</b> more pre-token protocols the watchlist’s own rule would keep, at any TVL — no wrapped, staked or bridged product, no versioned pool, no exchange product. Every implied value below is this entry’s own claim from the snapshot’s figures: an expected value — the value if a token launches, times the fitted chance one is recorded — a model, not a promise.</p></div>' +
-      '<aside class="margin-note"><span class="mn-label">Read this first</span>' +
-      'Lido: <b>$18.7B</b> TVL, <b>$251M</b> mcap. Flat ratio says <b>$4.6B</b>; the curve says $251M. That gap is the whole model.' +
-      '<div class="mb">' + bars + '</div></aside></div>' +
-      '<div class="facts">' +
-      '<div class="fact"><b>' + D.watchlist_size + ' / ' + D.watchlist_size + '</b><span>Watchlist covered</span></div>' +
-      '<div class="fact"><b>' + D.board_size + '</b><span>Pre-token rows scored</span></div>' +
-      '<div class="fact"><b>' + D.early_size + '</b><span>Early rows found below the floor</span></div>' +
-      '<div class="fact hot"><b>' + fmtUsd(top ? top.implied_value_usd : null) + '</b><span>Top implied value</span></div>' +
-      '<div class="fact"><b>' + D.curve.comps + '</b><span>Live comps price the curve</span></div>' +
-      '<div class="fact"><b>R² ' + D.curve.r_squared + '</b><span>Curve fit · LOO error ' + D.validation[0].median_abs_log_err + ' dex</span></div>' +
-      '</div>' +
-      '<p class="note">Accounting: ' + a.total + ' protocols in the snapshot — ' + a.live_with_mcap + ' with a market cap set aside, ' + a.token_recorded_no_mcap + ' record a token but no market cap, ' + a.no_token_record + ' record no token. Of those ' + a.no_token_record + ', ' + a.excluded_category + ' fall in an excluded category, ' + a.excluded_versioned + ' are versioned pools and ' + a.excluded_wrapped_word + ' are wrapped or staked products — leaving ' + a.rankable + ' ranked rows.</p></section>';
   }
   function controlsHtml() {
     var cats = Array.from(new Set(D.rows.map(function (r) { return r.category || 'Other'; }))).sort();
@@ -203,31 +247,53 @@
         return '<option value="' + esc(c) + '"' + (cur === c ? ' selected' : '') + '>' + esc(c) + '</option>';
       }).join('');
     };
-    var tabBtn = function (tab, label) {
-      return '<button type="button" data-act="tab" data-tab="' + tab + '" aria-pressed="' + (st.tab === tab) + '">' + label + '</button>';
-    };
     var shown = st.tab === 'board' ? shownRows().length + ' of ' + D.board_size + ' rows shown' : st.tab === 'live' ? D.live.length + ' live-token protocols' : 'Method, validation and accounting';
     return '<div class="controls">' +
       '<div class="field"><label for="q">Search</label><input type="search" id="q" placeholder="Name, category or chain" value="' + esc(st.q) + '" aria-label="Search the board"></div>' +
       '<div class="field"><label for="category">Category</label><select id="category" aria-label="Filter by category">' + opts(cats, st.cat, 'All categories') + '</select></div>' +
       '<div class="field"><label for="chain">Chain</label><select id="chain" aria-label="Filter by chain">' + opts(chains, st.chain, 'All chains') + '</select></div>' +
       '<label class="check"><input type="checkbox" id="wl"' + (st.wl ? ' checked' : '') + '> Watchlist only</label>' +
-      '<div class="field"><span class="sub">View</span><div class="tabs">' + tabBtn('board', 'Pre-token') + tabBtn('live', 'Live token') + tabBtn('method', 'Method') + '</div></div>' +
       '<span class="count">' + shown + '</span></div>';
+  }
+  function donutHtml() {
+    var tot = 0, byCat = {};
+    D.rows.forEach(function (r) { tot += r.implied_value_usd; byCat[r.category || 'Other'] = (byCat[r.category || 'Other'] || 0) + r.implied_value_usd; });
+    var cats = Object.keys(byCat).map(function (c) { return { c: c, v: byCat[c] }; }).sort(function (a, b) { return b.v - a.v; });
+    var top = cats.slice(0, 5), restV = 0;
+    cats.slice(5).forEach(function (s) { restV += s.v; });
+    var segs = top.concat(restV > 0 ? [{ c: 'Other', v: restV }] : []);
+    var C = 2 * Math.PI * 54, off = 0;
+    var circles = segs.map(function (s, i) {
+      var len = s.v / tot * C;
+      var str = '<circle class="dseg seg-' + i + '" r="54" cx="70" cy="70" stroke-dasharray="' + len.toFixed(1) + ' ' + (C - len).toFixed(1) + '" stroke-dashoffset="' + (-off).toFixed(1) + '"/>';
+      off += len;
+      return str;
+    }).join('');
+    var legend = segs.map(function (s, i) {
+      return '<div class="lg-row"><span class="sw seg-' + i + '"></span><span class="lg-name">' + esc(s.c) + '</span><span class="lg-share">' + Math.round(s.v / tot * 100) + '%</span><span class="lg-val pos">' + fmtUsd(s.v) + '</span></div>';
+    }).join('');
+    return '<div class="card donut-card"><h3>Allocation by category</h3><p class="card-sub">Share of total implied value, by category — whole board, ignores the filter</p>' +
+      '<div class="donut-wrap"><svg class="donut" viewBox="0 0 140 140" role="img" aria-label="Category allocation of implied value"><g transform="rotate(-90 70 70)">' + circles + '</g>' +
+      '<text class="donut-total pos" x="70" y="66" text-anchor="middle">' + fmtUsd(tot) + '</text><text class="donut-cap" x="70" y="84" text-anchor="middle">total implied</text></svg></div>' +
+      '<div class="legend">' + legend + '</div></div>';
   }
   function moversHtml() {
     var top3 = D.rows.slice(0, 3);
     var withChange = D.rows.filter(function (r) { return r.change_7d !== null; });
     var gainer = withChange.reduce(function (a, b) { return b.change_7d > a.change_7d ? b : a; }, withChange[0]);
     var loser = withChange.reduce(function (a, b) { return b.change_7d < a.change_7d ? b : a; }, withChange[0]);
-    var chips = '<span class="lab">Movers</span>' + top3.map(function (r, i) {
-      return '<span class="mv"><span class="dot"></span><b>#' + (i + 1) + ' ' + esc(r.name) + '</b><span class="num">' + fmtUsd(r.implied_value_usd) + '</span></span>';
+    var lines = top3.map(function (r, i) {
+      return '<div class="mv"><span class="mv-name">#' + (i + 1) + ' ' + esc(r.name) + '</span><span class="mv-val pos">' + fmtUsd(r.implied_value_usd) + '</span></div>';
     }).join('');
     if (gainer && loser) {
-      chips += '<span class="lab">7d</span><span class="mv"><span class="dot"></span><b>' + esc(gainer.name) + '</b><span class="num pos">' + fmtPct(gainer.change_7d) + '</span></span>' +
-        '<span class="mv"><span class="dot"></span><b>' + esc(loser.name) + '</b><span class="num neg">' + fmtPct(loser.change_7d) + '</span></span>';
+      lines += '<div class="mv"><span class="mv-name">▲ ' + esc(gainer.name) + ' · 7d</span><span class="mv-val pos">' + fmtPct(gainer.change_7d) + '</span></div>' +
+        '<div class="mv"><span class="mv-name">▼ ' + esc(loser.name) + ' · 7d</span><span class="mv-val neg">' + fmtPct(loser.change_7d) + '</span></div>';
     }
-    return '<div class="movers">' + chips + '</div>';
+    return '<div class="card movers-card"><h3>Movers</h3><p class="card-sub">Top of the board, and the week’s biggest moves</p>' + lines + '</div>';
+  }
+  function railHtml() {
+    return '<div class="rail">' + donutHtml() + moversHtml() +
+      '<div class="card note-card"><h3>Read this first</h3><p>Lido: <b>$18.7B</b> TVL, <b>$251M</b> mcap. Flat ratio says <b>$4.6B</b>; the curve says $251M. That gap is the whole model.</p></div></div>';
   }
   function shownChains(r) {
     var cs = (r.chains || []).slice();
@@ -249,11 +315,11 @@
       var perHour = r.farm_per_hour_usd;
       var phCls = perHour >= 0 ? 'pos' : 'neg';
       return '<tr data-slug="' + esc(r.slug) + '" tabindex="0"' + (st.sel === r.slug ? ' class="sel"' : '') + '>' +
-        '<td class="rank' + (r.rank <= 3 ? ' top3' : '') + '">' + r.rank + '</td>' +
-        '<td><div class="rowid"><span class="mono" aria-hidden="true">' + esc((r.name || '·')[0]) + '</span><div><div class="name"><b>' + esc(r.name) + '</b><span class="rowarrow" aria-hidden="true"> →</span></div><span class="sub"><span class="catdot cat-' + catColor(r.category) + '"></span>' + esc(r.category || 'Other') + ' on ' + esc(shownChains(r)) + (WL[r.slug] ? ' · watchlist' : ' · early') + '</span></div></div></td>' +
+        '<td class="rank">' + r.rank + '</td>' +
+        '<td><div class="rowid"><span class="mono" aria-hidden="true">' + esc((r.name || '·')[0]) + '</span><div><div class="name"><b>' + esc(r.name) + '</b><span class="rowarrow" aria-hidden="true"> →</span></div><span class="sub">' + esc(r.category || 'Other') + ' on ' + esc(shownChains(r)) + (WL[r.slug] ? ' · watchlist' : ' · early') + '</span></div></div></td>' +
         '<td class="num" title="' + fmtUsdFull(r.tvl_usd) + '">' + fmtUsd(r.tvl_usd) + '</td>' +
         '<td class="num ' + gc + '">' + g + '</td>' +
-        '<td><div class="implied"><span class="num" title="' + fmtUsdFull(r.implied_value_usd) + '">' + fmtUsd(r.implied_value_usd) + '</span><div class="bar" aria-hidden="true"><i class="' + (r.rank <= 3 ? 'top3' : '') + '" style="width:' + w + '%"></i></div></div></td>' +
+        '<td><div class="implied"><span class="num pos" title="' + fmtUsdFull(r.implied_value_usd) + '">' + fmtUsd(r.implied_value_usd) + '</span><div class="bar" aria-hidden="true"><i style="width:' + w + '%"></i></div></div></td>' +
         '<td class="num range">#' + r.rank_lo + '–' + r.rank_hi + '<br><span class="range">' + fmtUsd(r.value_lo_usd) + '–' + fmtUsd(r.value_hi_usd) + '</span></td>' +
         '<td class="num" title="Gas bill for the whole farm">$' + r.farm_cost_usd.toFixed(2) + '</td>' +
         '<td class="num ' + phCls + '" title="Net $/hour at a 0.001% allocation of implied value">' + fmtMoney(perHour) + '</td></tr>';
@@ -275,21 +341,23 @@
     var steps = r.farm_step_parts.map(function (s) {
       return '<li>' + esc(s.text) + '<span class="cost">Cost: ' + esc(s.cost) + '. Time: ' + esc(s.time) + '.</span></li>';
     }).join('');
+    var g7 = r.change_7d === null ? '' : r.change_7d >= 0 ? 'pos' : 'neg';
+    var phCls = r.farm_per_hour_usd >= 0 ? 'pos' : 'neg';
     return '<section class="panel detail" aria-label="Protocol detail"><div class="inner">' +
-      '<p class="eyebrow"><span class="mark">' + logo(13) + '</span>Detail · #' + r.rank + ' of ' + D.board_size + '</p>' +
+      '<div class="detail-head"><p class="eyebrow"><span class="mark">' + logo(13) + '</span>Detail · #' + r.rank + ' of ' + D.board_size + '</p><span class="btns"><button class="button" type="button" data-act="nav" data-nav="farm">Farm plans</button><button class="button" type="button" data-act="close">Close</button></span></div>' +
       '<h2>#' + r.rank + ' ' + esc(r.name) + '</h2>' +
-      '<p class="kicker">' + esc(r.category || 'Other') + ' · ' + esc(chainTxt) + ' · ' + (WL[r.slug] ? 'watchlist' : 'early') + ' · listed ' + (r.listed_at ? fmtDate(r.listed_at) : 'date unknown') + ' (' + fmtAge(r.age_days) + ') · TVL ' + fmtUsdFull(r.tvl_usd) + ' · 7d ' + fmtPct(r.change_7d) + ' <button class="button" type="button" data-act="close" style="float:right">Close</button></p>' +
-      '<div class="bandbar" aria-hidden="true"><i style="left:' + lo.toFixed(1) + '%;width:' + Math.max(0.6, hi - lo).toFixed(1) + '%"></i><b style="left:' + at.toFixed(1) + '%"></b></div>' +
+      '<p class="kicker">' + esc(r.category || 'Other') + ' · ' + esc(chainTxt) + ' · ' + (WL[r.slug] ? 'watchlist' : 'early') + ' · listed ' + (r.listed_at ? fmtDate(r.listed_at) : 'date unknown') + ' (' + fmtAge(r.age_days) + ') · TVL ' + fmtUsdFull(r.tvl_usd) + ' · 7d <span class="' + g7 + '">' + fmtPct(r.change_7d) + '</span></p>' +
+      '<div class="bandbar" aria-hidden="true" title="Bootstrap rank range #' + r.rank_lo + '–#' + r.rank_hi + ' · 80% value band ' + fmtUsd(r.value_lo_usd) + '–' + fmtUsd(r.value_hi_usd) + '"><i style="left:' + lo.toFixed(1) + '%;width:' + Math.max(0.6, hi - lo).toFixed(1) + '%"></i><b style="left:' + at.toFixed(1) + '%"></b></div>' +
       '<p class="note">Rank ' + r.rank + ' of ' + D.board_size + ' · bootstrap rank range #' + r.rank_lo + '–' + r.rank_hi + ' · 80% value band ' + fmtUsd(r.value_lo_usd) + '–' + fmtUsd(r.value_hi_usd) + '.</p>' +
       '<div class="cols"><div><h3>How the value is built</h3><table class="kv">' +
-      '<tr><td>Fitted base (curve)</td><td>' + fmtUsdFull(r.fitted_base_usd) + '</td></tr>' +
+      '<tr><td>Fitted base (curve)</td><td class="pos">' + fmtUsdFull(r.fitted_base_usd) + '</td></tr>' +
       '<tr><td>Category tilt</td><td>' + (r.tilt_dex >= 0 ? '+' : '') + r.tilt_dex.toFixed(4) + ' dex</td></tr>' +
       '<tr><td>Growth multiplier</td><td>' + r.growth_multiplier.toFixed(4) + '×</td></tr>' +
       '<tr><td>Maturity multiplier</td><td>' + r.maturity_multiplier.toFixed(4) + '×</td></tr>' +
       '<tr><td>Breadth multiplier</td><td>' + r.breadth_multiplier.toFixed(4) + '×</td></tr>' +
-      '<tr><td>Value if a token launches</td><td>' + fmtUsdFull(r.conditional_value_usd) + '</td></tr>' +
-      '<tr><td>Launch propensity</td><td>' + Math.round(r.launch_propensity * 100) + '%</td></tr>' +
-      '<tr><td><b>Implied value (expected)</b></td><td><b>' + fmtUsdFull(r.implied_value_usd) + '</b></td></tr>' +
+      '<tr><td>Value if a token launches</td><td class="pos">' + fmtUsdFull(r.conditional_value_usd) + '</td></tr>' +
+      '<tr><td>Launch propensity</td><td class="prop">' + Math.round(r.launch_propensity * 100) + '%</td></tr>' +
+      '<tr><td><b>Implied value (expected)</b></td><td class="pos"><b>' + fmtUsdFull(r.implied_value_usd) + '</b></td></tr>' +
       (cal ? '<tr><td>Category comps (' + esc(cal.category) + ')</td><td>' + cal.comps + '</td></tr>' +
         '<tr><td>Category median ratio</td><td>' + cal.median_ratio.toFixed(3) + '×</td></tr>' +
         '<tr><td>Fitted multiple at $100M TVL</td><td>' + cal.multiple_at_100m.toFixed(3) + '×</td></tr>' : '') +
@@ -301,21 +369,23 @@
       '<tr><td><b>Gas bill, whole farm</b></td><td><b>$' + r.farm_cost_usd.toFixed(2) + '</b></td></tr>' +
       '<tr><td>Hands-on time</td><td>' + r.farm_hours.toFixed(2) + ' h over ' + r.farm_hold_days + ' days</td></tr>' +
       '<tr><td>Break-even allocation</td><td>$' + r.farm_cost_usd.toFixed(2) + ' · 1 in ' + beN.toLocaleString('en-US') + '</td></tr>' +
-      '<tr><td>Net $/hour at 0.001%</td><td>' + fmtMoney(r.farm_per_hour_usd) + '</td></tr>' +
+      '<tr><td>Net $/hour at 0.001%</td><td class="' + phCls + '">' + fmtMoney(r.farm_per_hour_usd) + '</td></tr>' +
       '</table><p class="note">The deposit comes back on exit — it is capital at risk, not money spent. Only the gas bill is spent.</p></div></div>' +
+      '<h3 style="margin-top:16px">Farm plan — 8 steps</h3><ol class="steps">' + steps + '</ol>' +
       '<h3 style="margin-top:16px">Allocation scenarios — not forecasts</h3>' +
       '<table><thead><tr><th scope="col">If your allocation is</th><th scope="col" class="num">Allocation</th><th scope="col" class="num">Net of gas</th><th scope="col" class="num">Net $/hour</th></tr></thead><tbody>' +
       scen.map(function (s) {
-        return '<tr><td>' + s.share + '% of implied value</td><td class="num">' + fmtMoney(s.alloc) + '</td><td class="num">' + fmtMoney(s.net) + '</td><td class="num ' + (s.perHour >= 0 ? 'pos' : 'neg') + '">' + fmtMoney(s.perHour) + '</td></tr>';
+        return '<tr><td>' + s.share + '% of implied value</td><td class="num pos">' + fmtMoney(s.alloc) + '</td><td class="num ' + (s.net >= 0 ? 'pos' : 'neg') + '">' + fmtMoney(s.net) + '</td><td class="num ' + (s.perHour >= 0 ? 'pos' : 'neg') + '">' + fmtMoney(s.perHour) + '</td></tr>';
       }).join('') + '</tbody></table>' +
       '<p class="note">0.001% is one farmer’s share if 10% of the supply is split among 10,000 farmers. A row whose 0.001% scenario nets negative is a row the farm does not pay for.</p>' +
-      '<h3 style="margin-top:16px">Farm plan — 8 steps</h3><ol class="steps">' + steps + '</ol>' +
       '</div></section>';
   }
+
   function liveHtml() {
     var rows = D.live.map(function (p, i) {
-      return '<tr><td class="rank">' + (i + 1) + '</td><td><b>' + esc(p.name) + '</b><span class="sub"><span class="catdot cat-' + catColor(p.category) + '"></span>' + esc(p.category || 'Other') + ' on ' + esc((p.chains || []).slice(0, 2).join(', ') || 'an unnamed chain') + '</span></td>' +
-        '<td class="num">' + fmtUsd(p.tvl_usd) + '</td><td class="num">' + fmtUsd(p.mcap_usd) + '</td><td class="num">' + (p.mcap_tvl_ratio === null ? 'n/a' : p.mcap_tvl_ratio.toFixed(3) + '×') + '</td><td class="num">' + fmtPct(p.change_7d) + '</td></tr>';
+      var gc = p.change_7d === null ? '' : p.change_7d >= 0 ? 'pos' : 'neg';
+      return '<tr><td class="rank">' + (i + 1) + '</td><td><b>' + esc(p.name) + '</b><span class="sub">' + esc(p.category || 'Other') + ' on ' + esc((p.chains || []).slice(0, 2).join(', ') || 'an unnamed chain') + '</span></td>' +
+        '<td class="num">' + fmtUsd(p.tvl_usd) + '</td><td class="num">' + fmtUsd(p.mcap_usd) + '</td><td class="num">' + (p.mcap_tvl_ratio === null ? 'n/a' : p.mcap_tvl_ratio.toFixed(3) + '×') + '</td><td class="num ' + gc + '">' + fmtPct(p.change_7d) + '</td></tr>';
     }).join('');
     return '<div class="panel"><div class="scrollx wide"><table><thead><tr><th scope="col">#</th><th scope="col">Protocol</th><th scope="col" class="num">TVL</th><th scope="col" class="num">Market cap</th><th scope="col" class="num">Mcap / TVL</th><th scope="col" class="num">7d</th></tr></thead><tbody>' + rows + '</tbody></table></div></div>' +
       '<p class="note" style="margin-top:10px">The ' + D.live.length + ' largest live-token protocols by market cap, shown with the market’s own values — never mixed into the ranked board. The curve is fitted on ' + D.curve.comps + ' live comps in all (CEX excluded); these ' + D.live.length + ' are the largest of them.</p>';
@@ -356,7 +426,7 @@
     });
     return '<svg class="chart" viewBox="0 0 ' + W + ' ' + H + '" role="img" aria-label="Log-log scatter of the largest live-token protocols against the fitted curve">' + grid +
       '<line class="fit" x1="' + X(1e6).toFixed(1) + '" y1="' + Y(yA).toFixed(1) + '" x2="' + X(1e11).toFixed(1) + '" y2="' + Y(yB).toFixed(1) + '"/>' + dots + lab + '</svg>' +
-      '<p class="note">Each dot is one of the 24 largest live-token protocols, plotted at its real TVL and market cap (log scales both ways). The red line is the fitted curve — no tilt. The scatter around it is the R² 0.143: the curve is the best single line through the cloud, and the cloud is wide.</p>';
+      '<p class="note">Each dot is one of the 24 largest live-token protocols, plotted at its real TVL and market cap (log scales both ways). The violet line is the fitted curve — no tilt. The scatter around it is the <span class="weak">R² ' + c.r_squared + '</span>: the curve is the best single line through the cloud, and the cloud is wide.</p>';
   }
   function methodHtml() {
     var c = D.curve;
@@ -378,8 +448,8 @@
     return '<section class="panel method"><p class="eyebrow"><span class="mark">' + logo(13) + '</span>02 — The method</p><h2>The model — radar-3</h2>' +
       '<p>Implied value follows only from the snapshot’s own figures. The base is a comps curve fitted on the protocols whose token already trades, not a flat ratio and not a hand-picked multiple — and the board ranks by the <i>expected</i> value: that fitted value times P, the fitted chance the protocol records a token (the second stage below).</p>' +
       '<p class="note">To the reader: this board is a claim, not a promise. It ranks pre-token protocols by expected value from a two-stage model — a fitted comps curve, then a launch propensity — validated leave-one-out, out-of-sample and walk-forward; P is a proxy for “records a token”, not a forecast that a token will launch.</p>' +
-      '<p class="formula">log10(mcap) = ' + c.intercept + ' + ' + c.slope + ' × log10(tvl) + tilt(category)\nimplied = fitted mcap × growth × maturity × breadth\nexpected = P × implied — the board’s ranking value\ngrowth = 1 + clamp(change_7d, −30, +30) / 100 × 0.5\nmaturity = 0.70 + 0.30 × (1 − e^(−age / 365))\nbreadth = min(1.20, 1 + 0.05 × ln(chains))</p>' +
-      '<p>The tilt is a category’s median log-residual from the curve, shrunk toward 0 with 8 pseudo-observations and capped at ±0.5 dex. Fit on ' + c.comps + ' live comps (CEX excluded): slope ' + c.slope + ', R² ' + c.r_squared + ', residual spread ' + c.resid_sd_dex + ' dex, global median mcap/TVL ' + c.global_median + '×. TVL alone explains only ' + Math.round(c.r_squared * 100) + '% of log market-cap variance — that is why every row carries a rank range and an 80% value band from 200 bootstrap refits, instead of a bare point estimate.</p>' +
+      '<p class="formula">log10(mcap) = ' + c.intercept + ' + ' + c.slope + ' × log10(tvl) + tilt(category)\nimplied = fitted mcap × growth × maturity × breadth\nexpected = <span class="prop">P</span> × implied — the board’s ranking value\ngrowth = 1 + clamp(change_7d, −30, +30) / 100 × 0.5\nmaturity = 0.70 + 0.30 × (1 − e^(−age / 365))\nbreadth = min(1.20, 1 + 0.05 × ln(chains))</p>' +
+      '<p>The tilt is a category’s median log-residual from the curve, shrunk toward 0 with 8 pseudo-observations and capped at ±0.5 dex. Fit on ' + c.comps + ' live comps (CEX excluded): slope ' + c.slope + ', <span class="weak">R² ' + c.r_squared + '</span>, residual spread ' + c.resid_sd_dex + ' dex, global median mcap/TVL ' + c.global_median + '×. TVL alone explains only <span class="weak">' + Math.round(c.r_squared * 100) + '%</span> of log market-cap variance — that is why every row carries a rank range and an 80% value band from 200 bootstrap refits, instead of a bare point estimate.</p>' +
       '<h3>Why the curve, not a flat ratio</h3>' +
       '<p>Market cap grows sub-linearly with TVL (slope ' + c.slope + ', not 1). A flat median ratio of ' + c.global_median + '× prices the largest protocols far too high: Lido holds $18.7B of TVL against a $251M market cap, a ratio of 0.013×. The table below scores both models on the same three splits — the curve wins on every one.</p>' +
       curveChart() +
@@ -427,13 +497,18 @@
       '<p>“Records no token” means the snapshot records no token for the protocol — never that it has none. Implied value is this entry’s own claim from the snapshot’s figures: an expected value, P × the value if a token launches, where P is a fitted proxy for whether a protocol records a token; it is not a price and not advice. Farm plans are generic steps derived from each protocol’s category, chains, TVL and age; check the protocol’s own pages before you deposit anything.</p></footer>';
   }
   function render() {
-    var html = headerHtml() + ledeHtml() + controlsHtml();
-    if (st.tab === 'board') html += moversHtml();
-    if (st.tab === 'board' && st.sel) html += detailHtml();
-    if (st.tab === 'board') html += boardHtml();
-    else if (st.tab === 'live') html += liveHtml();
-    else html += methodHtml();
-    html += footerHtml();
+    var html = sidebarHtml();
+    html += '<div class="main">';
+    if (st.tab === 'method') {
+      html += methodHtml();
+    } else if (st.tab === 'live') {
+      html += '<section class="page-head"><p class="eyebrow"><span class="mark">' + logo(13) + '</span>03 — Live comps</p><h1>The market’s own prices.</h1><p class="dek">The ' + D.live.length + ' largest live-token protocols by market cap — the comps the curve is fitted on. They price the model; they are never ranked on this board.</p></section>' + liveHtml();
+    } else {
+      html += heroHtml() + controlsHtml();
+      if (st.sel) html += detailHtml();
+      html += '<div class="content-grid"><div>' + boardHtml() + '</div>' + railHtml() + '</div>';
+    }
+    html += footerHtml() + '</div>';
     app.innerHTML = html;
     app.setAttribute('aria-busy', 'false');
   }
@@ -466,8 +541,17 @@
     var tr = e.target.closest ? e.target.closest('tr[data-slug]') : null;
     if (el) {
       var act = el.getAttribute('data-act');
-      if (act === 'tab') { st.tab = el.getAttribute('data-tab'); st.sel = null; st.all = false; writeHash(); render(); }
-      else if (act === 'sort') {
+      if (act === 'nav') {
+        var nav = el.getAttribute('data-nav');
+        st.sel = null; st.all = false;
+        if (nav === 'overview') { st.tab = 'board'; st.wl = false; st.sort = 'implied'; st.dir = -1; }
+        else if (nav === 'watchlist') { st.tab = 'board'; st.wl = true; st.sort = 'implied'; st.dir = -1; }
+        else if (nav === 'farm') { st.tab = 'board'; st.wl = false; st.sort = 'perhour'; st.dir = -1; }
+        else if (nav === 'method') { st.tab = 'method'; }
+        else if (nav === 'live') { st.tab = 'live'; }
+        writeHash();
+        render();
+      } else if (act === 'sort') {
         var k = el.getAttribute('data-key');
         if (st.sort === k) st.dir = -st.dir;
         else { st.sort = k; st.dir = (k === 'name' || k === 'rank' || k === 'cost') ? 1 : -1; }
@@ -504,7 +588,7 @@
   // KPI count-up, once, on first load only: the final values are already in
   // the markup, and the count never re-runs on sort or filter.
   if (window.matchMedia('(prefers-reduced-motion: no-preference)').matches) {
-    var facts = document.querySelectorAll('.fact b');
+    var facts = document.querySelectorAll('.fact b, .hero-num');
     for (var i = 0; i < facts.length; i++) countUp(facts[i]);
   }
 })();
