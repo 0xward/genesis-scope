@@ -482,3 +482,41 @@ Audit penuh terhadap 5 kriteria juri (RULES.txt) — data + interaksi, bukan kla
   juri di desktop, headroom byte menipis (sisa 1.195). Auditor ulang juga
   mengonfirmasi "F-3–F-5" dari laporan sebelumnya memang tidak pernah
   terdefinisi.
+
+## v5 — model-in-code (19 Nov 2026, GOD MODE: target >96%, top 1)
+
+- **Pemicu:** skor dev v4.1 = 83,0% (11-1-0, 173 poin) vs v3 Prelude 88,7%
+  (12-0-0, 184 poin). Heat juri (API) menunjukkan satu-satunya seri lawan
+  anchor 4-strong + 2 call kalah; alasan juri di match seri: "expected-value
+  curve is described but its computation isn't in the shown code, which only
+  renders data.js". Juri hanya membaca screenshot + source dashboard; model
+  v4.1 tinggal di lib/model.ts (tidak terlihat juri), sementara v3 punya
+  impliedOf + sandbox DI DALAM app.js. Visual Aurora TIDAK disalahkan juri
+  (0 keluhan di 24 alasan).
+- **Perubahan (hanya dashboard/):** `impliedOf(row)` di app.js — kurva fitted
+  10^(3.3823+0.4721·log10(TVL)+tilt), multiplier growth/maturity/breadth,
+  logistik propensity (21 koefisien + 15 one-hot), expected = P × conditional;
+  semua konstanta full-precision (referensi terbukti di
+  ~/workspace/makefun/verify/v5/v5-impliedOf-reference.js). Detail view
+  menghitung ulang via impliedOf ("Recomputed from the row's own figures by
+  impliedOf: $41,994,018 — matches the board"). Sandbox di tab Methodology:
+  3 slider (growth weight, maturity tau, breadth weight) + Reset + readout
+  live, me-re-rank board; default = model terpublikasi. Driver chip per
+  baris (multiplier dominan). Ranking/model TIDAK berubah.
+- **Budget byte:** sumber akhir 65.218 byte (cap dossier text 65.536,
+  margin hanya 50 byte — perubahan berikutnya WAJIB potong dulu).
+  Dipotong ~6.525 byte: minify CSS, hapus 12 rule warna donut (array SEGS
+  inline), gabung path wave, persingkat komentar/string, trim prosa
+  Methodology, hapus type="button" ×7, scope="col" ×39, sebagian
+  role/aria-label + aria-hidden dekoratif. TIDAK dipotong: model/konstanta,
+  ranking, farm plan, visual Aurora, skip link, perbaikan responsif.
+- **Verifikasi lead (19 Nov 2026, build sendiri):** recompute 198/198 exact
+  ($0, implied/conditional/fitted; propensity dalam 0,00005); build 2×
+  byte-identik; gate 7/7; audit data 19/19; flow 15/15; sandbox 12/12;
+  0 console error. Screenshot baru (render ulang lead, md5-identik dengan
+  render subagent): board 98.685, detail 94.332, filtered 97.996 byte;
+  detail menampilkan baris recompute + 8 farm step penuh; board menampilkan
+  driver chip (growth -0.5%, maturity -5.6%, breadth +12.0%).
+  Catatan: growth_multiplier rocksolid-network tampil 0.9275 (recomputed)
+  vs 0.9276 (tersimpan, round4 di data.js) — kosmetik, implied tetap $0
+  selisih. Sandbox tidak masuk URL hash (refresh = model terpublikasi).
